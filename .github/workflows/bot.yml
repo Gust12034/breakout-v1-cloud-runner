@@ -87,7 +87,7 @@ jobs:
               print("[PASS] Google Apps Script control-plane read succeeded.")
           except Exception as exc:
               message = str(exc).lower()
-              status = re.search(r"\\b(401|403|404|408|429|500|502|503|504)\\b", message)
+              status = re.search(r"\b(401|403|404|408|429|500|502|503|504)\b", message)
               if "unauthorized" in message:
                   reason = "Apps Script rejected CONTROL_PLANE_TOKEN; compare it with the project's Script Property."
               elif status:
