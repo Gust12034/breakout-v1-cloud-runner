@@ -1,0 +1,82 @@
+name: Breakout V1 Dynamic Bitget Classic Demo Bot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The Apps Script scheduler checks active runs before dispatching. This shared
+# concurrency group is a second safety barrier against overlapping state writes.
+concurrency:
+  group: breakout-v1d-bitget-classic-demo-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    name: Evaluate V1 Dynamic strategy (Bitget Classic Demo only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TRADING_ENABLED: ${{ vars.TRADING_ENABLED || 'false' }}
+      PYTHONUNBUFFERED: '1'
+      LIVE_TRADING: 'false'
+      BITGET_DEMO_API_KEY: ${{ secrets.BITGET_DEMO_API_KEY }}
+      BITGET_DEMO_API_SECRET: ${{ secrets.BITGET_DEMO_API_SECRET }}
+      BITGET_DEMO_API_PASSPHRASE: ${{ secrets.BITGET_DEMO_API_PASSPHRASE }}
+      BITGET_MARGIN_MODE: ${{ vars.BITGET_MARGIN_MODE || 'isolated' }}
+      GOOGLE_APPS_SCRIPT_URL: ${{ secrets.GOOGLE_APPS_SCRIPT_URL }}
+      CONTROL_PLANE_TOKEN: ${{ secrets.CONTROL_PLANE_TOKEN }}
+      SYMBOLS: ${{ vars.TRADE_SYMBOLS || vars.SYMBOLS || 'BTCUSDT' }}
+      TRADE_SYMBOLS: ${{ vars.TRADE_SYMBOLS || vars.SYMBOLS || 'BTCUSDT' }}
+      SIGNAL_DATA_SOURCE: ${{ vars.SIGNAL_DATA_SOURCE || 'binance_spot' }}
+      LEN_N: ${{ vars.LEN_N || '48' }}
+      VOL_MULT: ${{ vars.V1D_VOL_MULT || '1.5' }}
+      ADX_MAX: ${{ vars.V1D_ADX_MAX || '0.0' }}
+      ENABLE_LONGS: ${{ vars.ENABLE_LONGS || 'true' }}
+      ENABLE_SHORTS: ${{ vars.ENABLE_SHORTS || 'true' }}
+      ATR_K: ${{ vars.ATR_K || '2.5' }}
+      EXIT_MODE: ${{ vars.V1D_EXIT_MODE || 'Chandelier + BE' }}
+      BE_AT: ${{ vars.V1D_BE_AT || '1.0' }}
+      TRAIL_M: ${{ vars.V1D_TRAIL_M || '4.0' }}
+      DON_M: ${{ vars.V1D_DON_M || '20' }}
+      RR: ${{ vars.RR || '2.0' }}
+      ANALYZE_TOP_COINS: ${{ vars.ANALYZE_TOP_COINS || 'true' }}
+      TRADE_TOP_COINS: ${{ vars.TRADE_TOP_COINS || 'true' }}
+      TOP_COINS_COUNT: ${{ vars.TOP_COINS_COUNT || '100' }}
+      ALLOW_POSITION_RECOVERY: ${{ vars.ALLOW_POSITION_RECOVERY || 'false' }}
+      SYMBOL_PROCESS_DELAY_SEC: '0.12'
+    steps:
+      - name: Checkout deployment wrapper and encrypted payload
+        uses: actions/checkout@v7
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install decryptor dependency
+        run: python -m pip install --disable-pip-version-check 'cryptography>=42,<50'
+      - name: Reassemble encrypted runtime from public base64 parts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat private_bundle/payload.part-* | base64 --decode > "$RUNNER_TEMP/bot_payload.bin"
+          test -s "$RUNNER_TEMP/bot_payload.bin"
+      - name: Decrypt runtime into ephemeral runner storage
+        env:
+          BOT_BUNDLE_PASSPHRASE: ${{ secrets.BOT_BUNDLE_PASSPHRASE }}
+        run: python scripts/decrypt_bundle.py --input "$RUNNER_TEMP/bot_payload.bin" --output "$RUNNER_TEMP/breakout_runtime"
+      - name: Install runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r "$RUNNER_TEMP/breakout_runtime/requirements.txt"
+      - name: Run offline validation suite
+        run: python -m unittest discover -s "$RUNNER_TEMP/breakout_runtime/tests" -v
+      - name: Run strategy in Bitget Classic Demo only
+        shell: bash
+        run: |
+          set +e
+          python "$RUNNER_TEMP/breakout_runtime/runner.py" > "$RUNNER_TEMP/breakout_runner.log" 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Runner failed (exit $rc). Private details were not printed to the public log; inspect the private Google Sheets/Telegram event log."
+            exit "$rc"
+          fi
+          echo "Runner completed. Detailed output remains in ephemeral runner storage."
