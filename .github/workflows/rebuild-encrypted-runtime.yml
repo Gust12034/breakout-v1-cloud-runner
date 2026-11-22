@@ -1,0 +1,71 @@
+name: Rebuild encrypted runtime with portfolio limits
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/rebuild-encrypted-runtime.yml"
+      - "scripts/rebuild_encrypted_runtime.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: breakout-v1d-encrypted-runtime-rebuild
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    name: Rebuild, validate, and commit encrypted runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout deployment repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install encryption dependency
+        run: python -m pip install --disable-pip-version-check "cryptography>=42,<50"
+
+      - name: Verify current encrypted payload checksum
+        shell: bash
+        run: |
+          if ! (cd private_bundle && sha256sum --check --status PAYLOAD_SHA256.txt); then
+            echo "::error::Current encrypted runtime checksum validation failed."
+            exit 1
+          fi
+          echo "[PASS] Existing encrypted runtime integrity verified."
+
+      - name: Apply 7-position and 4-entry limits, then re-encrypt
+        env:
+          BOT_BUNDLE_PASSPHRASE: ${{ secrets.BOT_BUNDLE_PASSPHRASE }}
+        run: |
+          python scripts/rebuild_encrypted_runtime.py \
+            --input private_bundle/bot_payload.bin \
+            --checksum-file private_bundle/PAYLOAD_SHA256.txt \
+            --runtime-output "$RUNNER_TEMP/rebuilt-runtime"
+
+      - name: Install runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r "$RUNNER_TEMP/rebuilt-runtime/requirements.txt"
+
+      - name: Run full offline validation suite with updated limits
+        working-directory: ${{ runner.temp }}/rebuilt-runtime
+        run: python -m unittest discover -s tests -v
+
+      - name: Commit only encrypted payload and checksum
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add private_bundle/bot_payload.bin private_bundle/PAYLOAD_SHA256.txt
+          if git diff --cached --quiet; then
+            echo "Encrypted payload already has the requested limits; no commit required."
+          else
+            git commit -m "Update encrypted runtime limits to 7 positions and 4 entries"
+            git push
+          fi
