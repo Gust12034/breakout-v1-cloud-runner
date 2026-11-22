@@ -124,41 +124,40 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             echo "::group::Sanitized runtime diagnostic"
             python - "$RUNNER_TEMP/breakout_monitor.log" <<'PY'
-            import re
-            import sys
-            from pathlib import Path
+          import re
+          import sys
+          from pathlib import Path
 
-            raw = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
-            found = re.findall(r"(?m)^([A-Za-z_][\w.]*(?:Error|Exception)):\s*(.*)$", raw)
-            if not found:
-                print("[DIAGNOSTIC] No final Python exception line was captured.")
-                print("[DIAGNOSTIC] Check the private Events sheet for a position-level error.")
-                raise SystemExit(0)
-
-            error_type, message = found[-1]
-            lower = message.lower()
-            if "controlplaneerror" in error_type.lower():
-                if "unauthorized" in lower:
-                    reason = "Google Apps Script rejected CONTROL_PLANE_TOKEN; compare the GitHub Actions secret with the Script Property."
-                elif "google_apps_script_url" in lower or "control_plane_token" in lower:
-                    reason = "The Google Apps Script URL or CONTROL_PLANE_TOKEN is missing or invalid."
-                elif "spreadsheet" in lower or "spreadsheet_id" in lower:
-                    reason = "The Apps Script control plane could not access the configured spreadsheet; inspect SPREADSHEET_ID and Apps Script Executions."
-                elif "invalid response" in lower or "json" in lower:
-                    reason = "Apps Script returned an invalid/non-JSON response; verify the deployed /exec URL and its access settings."
-                else:
-                    reason = "Google Apps Script control-plane request failed; detailed response withheld."
-            elif "bitgetapierror" in error_type.lower():
-                code = re.search(r"\bcode=(\d+)\b", message)
-                reason = "Bitget API request failed" + ((" (code=" + code.group(1) + ")") if code else "") + "."
-            elif "timeout" in error_type.lower() or "timed out" in lower:
-                reason = "A network/API request timed out."
-            elif "connection" in error_type.lower():
-                reason = "A network connection to an external service failed."
-            else:
-                reason = "Python raised " + error_type + "; exception details withheld from the public log."
-            print("[DIAGNOSTIC] " + reason)
-            PY
+          raw = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          found = re.findall(r"(?m)^([A-Za-z_][\w.]*(?:Error|Exception)):\s*(.*)$", raw)
+          if not found:
+              print("[DIAGNOSTIC] No final Python exception line was captured.")
+              print("[DIAGNOSTIC] Check the private Events sheet for a position-level error.")
+          else:
+              error_type, message = found[-1]
+              lower = message.lower()
+              if "controlplaneerror" in error_type.lower():
+                  if "unauthorized" in lower:
+                      reason = "Google Apps Script rejected CONTROL_PLANE_TOKEN; compare the GitHub Actions secret with the Script Property."
+                  elif "google_apps_script_url" in lower or "control_plane_token" in lower:
+                      reason = "The Google Apps Script URL or CONTROL_PLANE_TOKEN is missing or invalid."
+                  elif "spreadsheet" in lower or "spreadsheet_id" in lower:
+                      reason = "The Apps Script control plane could not access the configured spreadsheet; inspect SPREADSHEET_ID and Apps Script Executions."
+                  elif "invalid response" in lower or "json" in lower:
+                      reason = "Apps Script returned an invalid/non-JSON response; verify the deployed /exec URL and its access settings."
+                  else:
+                      reason = "Google Apps Script control-plane request failed; detailed response withheld."
+              elif "bitgetapierror" in error_type.lower():
+                  code = re.search(r"\bcode=(\d+)\b", message)
+                  reason = "Bitget API request failed" + ((" (code=" + code.group(1) + ")") if code else "") + "."
+              elif "timeout" in error_type.lower() or "timed out" in lower:
+                  reason = "A network/API request timed out."
+              elif "connection" in error_type.lower():
+                  reason = "A network connection to an external service failed."
+              else:
+                  reason = "Python raised " + error_type + "; exception details withheld from the public log."
+              print("[DIAGNOSTIC] " + reason)
+          PY
             echo "::endgroup::"
             echo "::error::Position monitor failed (exit $rc)."
             exit "$rc"
