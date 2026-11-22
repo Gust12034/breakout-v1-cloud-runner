@@ -62,7 +62,7 @@ def encrypt_bundle(plain: bytes, passphrase: str) -> bytes:
 
 
 def set_integer_assignment(source: str, name: str, allowed_values: set[int], target: int) -> str:
-    pattern = re.compile(rf"(?m)^({re.escape(name)}\\s*=\\s*)(\\d+)(\\s*)$")
+    pattern = re.compile(rf"(?m)^({re.escape(name)}\s*=\s*)(\d+)(\s*)$")
     matches = list(pattern.finditer(source))
     if len(matches) != 1:
         raise RuntimeError(f"Expected exactly one {name} assignment in encrypted runtime.")
