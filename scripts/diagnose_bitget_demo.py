@@ -38,7 +38,6 @@ def main() -> int:
         print("[FAIL] Diagnostic dependency unavailable: " + type(exc).__name__)
         return 2
 
-    original_get = requests.Session.get
     original_request = requests.Session.request
 
     def inspect_response(response, url):
@@ -63,15 +62,12 @@ def main() -> int:
             print("[FAIL] Could not safely decode the Bitget HTTP error response.", flush=True)
         return response
 
-    def patched_get(session, url, *args, **kwargs):
-        response = original_get(session, url, *args, **kwargs)
-        return inspect_response(response, url)
-
     def patched_request(session, method, url, *args, **kwargs):
         response = original_request(session, method, url, *args, **kwargs)
         return inspect_response(response, url)
 
-    requests.Session.get = patched_get
+    # requests.Session.get() delegates to Session.request(); patching only
+    # request avoids reporting the same HTTP error twice.
     requests.Session.request = patched_request
     sys.path.insert(0, str(runtime))
     try:
@@ -79,7 +75,6 @@ def main() -> int:
     except SystemExit as exc:
         return int(exc.code or 0) if isinstance(exc.code, int) or exc.code is None else 1
     finally:
-        requests.Session.get = original_get
         requests.Session.request = original_request
     return 0
 
