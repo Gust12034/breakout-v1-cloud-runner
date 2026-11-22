@@ -51,7 +51,31 @@ jobs:
           python "$RUNNER_TEMP/breakout_runtime/scripts/check_bitget_demo.py" > "$RUNNER_TEMP/bitget_check.log" 2>&1
           rc=$?
           if [ "$rc" -ne 0 ]; then
-            echo "::error::Read-only Bitget check failed (exit $rc). No credential or account detail was printed."
+            echo "::group::Sanitized Bitget diagnostic"
+            python - "$RUNNER_TEMP/bitget_check.log" <<'PY'
+          import os, re, sys
+          from pathlib import Path
+          raw = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          for name in ("BITGET_DEMO_API_KEY", "BITGET_DEMO_API_SECRET", "BITGET_DEMO_API_PASSPHRASE"):
+              value = os.environ.get(name, "")
+              if value:
+                  raw = raw.replace(value, "[REDACTED]")
+          lines = raw.splitlines()
+          safe = []
+          for line in lines:
+              if any(tag in line for tag in ("ACCESS-KEY", "ACCESS-SIGN", "ACCESS-PASSPHRASE", "secret", "passphrase", "api_key", "api_secret")):
+                  line = re.sub(r"(?i)(ACCESS-KEY|ACCESS-SIGN|ACCESS-PASSPHRASE|api[_-]?key|api[_-]?secret|passphrase)(\\s*[=:]\\s*)[^,; ]+", r"\\1\\2[REDACTED]", line)
+              if line.startswith(("[PASS]", "[FAIL]")):
+                  safe.append(line[:700])
+          if safe:
+              for line in safe[-8:]:
+                  print(line)
+          else:
+              print("No safe diagnostic line found. Check GitHub Actions step setup and encrypted runtime.")
+          print("Credential values and full traceback were intentionally omitted.")
+          PY
+            echo "::endgroup::"
+            echo "::error::Read-only Bitget check failed (exit $rc). Review the sanitized diagnostic above."
             exit "$rc"
           fi
           echo "Read-only Bitget Demo connectivity check passed. No orders were placed."
