@@ -71,6 +71,52 @@ jobs:
       - name: Run offline validation suite
         working-directory: ${{ runner.temp }}/breakout_runtime
         run: python -m unittest discover -s tests -v
+      - name: Verify Google Apps Script control-plane access (read-only)
+        shell: bash
+        run: |
+          python - "$RUNNER_TEMP/breakout_runtime" <<'PY'
+          import re
+          import sys
+
+          sys.path.insert(0, sys.argv[1])
+          try:
+              from control_plane import ControlPlane
+              state = ControlPlane().get_state()
+              if not isinstance(state, dict):
+                  raise RuntimeError("state response was not an object")
+              print("[PASS] Google Apps Script control-plane read succeeded.")
+          except Exception as exc:
+              message = str(exc).lower()
+              status = re.search(r"\\b(401|403|404|408|429|500|502|503|504)\\b", message)
+              if "unauthorized" in message:
+                  reason = "Apps Script rejected CONTROL_PLANE_TOKEN; compare it with the project's Script Property."
+              elif status:
+                  code = status.group(1)
+                  reasons = {
+                      "401": "HTTP 401: authentication failed.",
+                      "403": "HTTP 403: web-app access denied; verify deployment access settings.",
+                      "404": "HTTP 404: GOOGLE_APPS_SCRIPT_URL may point to an old or invalid deployment.",
+                      "408": "HTTP 408: Apps Script request timed out.",
+                      "429": "HTTP 429: Apps Script quota/rate limit reached.",
+                      "500": "HTTP 500: Apps Script threw an internal error; inspect Apps Script Executions.",
+                      "502": "HTTP 502: Google service/proxy error.",
+                      "503": "HTTP 503: Apps Script temporarily unavailable.",
+                      "504": "HTTP 504: gateway timeout.",
+                  }
+                  reason = reasons.get(code, "HTTP " + code + ": Apps Script request failed.")
+              elif "spreadsheet" in message or "spreadsheet_id" in message:
+                  reason = "Spreadsheet configuration/access failed; verify SPREADSHEET_ID and the bound spreadsheet."
+              elif "google_apps_script_url" in message or "control_plane_token" in message:
+                  reason = "Required Script URL or control-plane token is missing/invalid in GitHub Actions Secrets."
+              elif "json" in message or "invalid response" in message:
+                  reason = "Apps Script returned a non-JSON or invalid application response; verify the deployed /exec URL and deployment version."
+              elif "request failed" in message:
+                  reason = "Network/transport failure while contacting Apps Script."
+              else:
+                  reason = "Control-plane initialization/read failed (" + type(exc).__name__ + "); detailed data withheld."
+              print("[FAIL] " + reason)
+              sys.exit(1)
+          PY
       - name: Run strategy in Bitget Classic Demo only
         shell: bash
         run: |
