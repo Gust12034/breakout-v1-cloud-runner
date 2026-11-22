@@ -26,31 +26,13 @@
 
 ## ۳) GitHub Actions Variables
 
-در `Settings → Secrets and variables → Actions → Variables` این مقادیر را اضافه کن:
+برای شروع فقط این Variable را در `Settings → Secrets and variables → Actions → Variables` بساز:
 
 | Variable | مقدار اولیه |
 |---|---|
 | `TRADING_ENABLED` | `false` |
-| `ANALYZE_TOP_COINS` | `true` |
-| `TRADE_TOP_COINS` | `true` |
-| `TOP_COINS_COUNT` | `100` |
-| `BITGET_MARGIN_MODE` | `isolated` |
-| `SIGNAL_DATA_SOURCE` | `binance_spot` |
-| `TRADE_SYMBOLS` | `BTCUSDT` |
-| `ALLOW_POSITION_RECOVERY` | `false` |
-| `LEN_N` | `48` |
-| `V1D_VOL_MULT` | `1.5` |
-| `V1D_ADX_MAX` | `0.0` |
-| `ENABLE_LONGS` | `true` |
-| `ENABLE_SHORTS` | `true` |
-| `ATR_K` | `2.5` |
-| `V1D_EXIT_MODE` | `Chandelier + BE` |
-| `V1D_BE_AT` | `1.0` |
-| `V1D_TRAIL_M` | `4.0` |
-| `V1D_DON_M` | `20` |
-| `RR` | `2.0` |
 
-تنظیمات سبد در payload رمزگذاری‌شده باقی مانده است: حداکثر ۳ پوزیشن، حداکثر ۱ ورودی جدید در هر اجرای تحلیل و ریسک تنظیمی ۶٫۵٪ برای هر پوزیشن. این سطح ریسک زیاد است؛ سقف ریسک نظری سه پوزیشن در صورت برخورد همه به حد ضرر اولیه تا ۱۹٫۵٪ سرمایه است.
+مقادیر پیش‌فرض بقیهٔ تنظیمات در فایل‌های Workflow تعریف شده‌اند؛ بنابراین فعلاً لازم نیست ۱۸ متغیر دیگر را جداگانه بسازی. تنظیمات سبد در payload رمزگذاری‌شده باقی مانده است: حداکثر ۳ پوزیشن، حداکثر ۱ ورودی جدید در هر اجرای تحلیل و ریسک تنظیمی ۶٫۵٪ برای هر پوزیشن. این سطح ریسک زیاد است؛ سقف ریسک نظری سه پوزیشن در صورت برخورد همه به حد ضرر اولیه تا ۱۹٫۵٪ سرمایه است.
 
 ## ۴) ساخت Fine-grained Personal Access Token
 
