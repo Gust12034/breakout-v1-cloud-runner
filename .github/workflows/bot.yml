@@ -55,6 +55,13 @@ jobs:
           python-version: '3.12'
       - name: Install decryptor dependency
         run: python -m pip install --disable-pip-version-check 'cryptography>=42,<50'
+      - name: Verify encrypted runtime integrity
+        shell: bash
+        run: |
+          if ! echo "3d198082bbb4dd0d46d99031290b318b7175a0088181ab0c76657fe5045afa2b  private_bundle/bot_payload.bin" | sha256sum --check --status; then
+            echo "::error::Encrypted runtime payload checksum mismatch. Re-upload the original bot_payload.bin file."
+            exit 1
+          fi
       - name: Decrypt runtime into ephemeral runner storage
         env:
           BOT_BUNDLE_PASSPHRASE: ${{ secrets.BOT_BUNDLE_PASSPHRASE }}
