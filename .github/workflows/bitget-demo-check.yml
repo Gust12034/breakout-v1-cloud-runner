@@ -31,7 +31,7 @@ jobs:
       - name: Verify encrypted runtime integrity
         shell: bash
         run: |
-          if ! echo "3d198082bbb4dd0d46d99031290b318b7175a0088181ab0c76657fe5045afa2b  private_bundle/bot_payload.bin" | sha256sum --check --status; then
+          if ! (cd private_bundle && sha256sum --check --status PAYLOAD_SHA256.txt); then
             echo "::error::Encrypted runtime payload checksum mismatch. Re-upload the original bot_payload.bin file."
             exit 1
           fi
