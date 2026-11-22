@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python "$RUNNER_TEMP/breakout_runtime/scripts/check_bitget_demo.py" > "$RUNNER_TEMP/bitget_check.log" 2>&1
+          python scripts/diagnose_bitget_demo.py "$RUNNER_TEMP/breakout_runtime" > "$RUNNER_TEMP/bitget_check.log" 2>&1
           rc=$?
           if [ "$rc" -ne 0 ]; then
             echo "::group::Sanitized Bitget diagnostic"
