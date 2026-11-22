@@ -129,7 +129,7 @@ jobs:
             from pathlib import Path
 
             raw = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
-            found = re.findall(r"(?m)^([A-Za-z_][\\w.]*(?:Error|Exception)):\\s*(.*)$", raw)
+            found = re.findall(r"(?m)^([A-Za-z_][\w.]*(?:Error|Exception)):\s*(.*)$", raw)
             if not found:
                 print("[DIAGNOSTIC] No final Python exception line was captured.")
                 print("[DIAGNOSTIC] Check the private Events sheet for a position-level error.")
@@ -149,7 +149,7 @@ jobs:
                 else:
                     reason = "Google Apps Script control-plane request failed; detailed response withheld."
             elif "bitgetapierror" in error_type.lower():
-                code = re.search(r"\\bcode=(\\d+)\\b", message)
+                code = re.search(r"\bcode=(\d+)\b", message)
                 reason = "Bitget API request failed" + ((" (code=" + code.group(1) + ")") if code else "") + "."
             elif "timeout" in error_type.lower() or "timed out" in lower:
                 reason = "A network/API request timed out."
