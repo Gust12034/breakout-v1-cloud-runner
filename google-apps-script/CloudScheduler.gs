@@ -167,7 +167,11 @@ function b1d_getJson_(path) {
 
 function b1d_dispatchWorkflow_(cfg, workflowFile) {
   const path = '/repos/' + cfg.owner + '/' + cfg.repo + '/actions/workflows/' + encodeURIComponent(workflowFile) + '/dispatches';
-  b1d_githubRequest_('post', path, { ref: cfg.ref }, [204]);
+  // GitHub currently may return either the documented 204 or a 200 JSON body with workflow_run_id.
+  const result = b1d_githubRequest_('post', path, { ref: cfg.ref }, [200, 204]);
+  if (result && result.workflow_run_id) {
+    console.log('GitHub workflow run created: ' + result.workflow_run_id);
+  }
 }
 
 function b1d_githubRequest_(method, path, payload, acceptedCodes) {
