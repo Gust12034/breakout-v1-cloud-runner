@@ -24,6 +24,25 @@
 
 برای کلید Bitget، فقط دسترسی لازم برای معاملهٔ Futures و خواندن حساب را فعال کن و **برداشت (Withdraw) را غیرفعال نگه دار**. این پروژه فقط برای Classic Futures Demo است، نه UTA و نه Mainnet.
 
+## ۲-الف) رفع خطای Bitget `40012`
+
+اگر تست Read-only پیام زیر را نشان داد:
+
+`code=40012; message=apikey/password is incorrect`
+
+درخواست عمومی Futures Demo موفق شده، اما درخواست خصوصی حساب احراز هویت نشده است. Endpoint عمومی Ticker به کلید خصوصی نیاز ندارد؛ پس موفقیت آن اعتبار API Key را ثابت نمی‌کند. کد `40012` در مستندات Bitget به معنی `apikey/password is incorrect` است.
+
+این خطا را این‌گونه رفع کن:
+
+1. وارد Bitget شو و محیط حساب را به **Demo Trading** تغییر بده.
+2. از بخش API Key Management یک **Demo API Key** جدید بساز. چون برنامه از REST API نسخهٔ **Classic V2 Futures** استفاده می‌کند، کلید را برای محیط Demo و حساب/محصول Classic بساز؛ کلید Mainnet یا کلید/محیط UTA را جایگزین آن نکن.
+3. API Key، API Secret و API Passphrase همان کلید جدید را با هم بردار. Passphrase، رمز ورود سایت Bitget نیست؛ همان عبارتی است که هنگام ساخت API Key تعیین کردی. اگر Passphrase را نمی‌دانی، کلید تازه بساز.
+4. در GitHub → Settings → Secrets and variables → Actions، سه Secret زیر را با هم به‌روزرسانی کن: `BITGET_DEMO_API_KEY`، `BITGET_DEMO_API_SECRET` و `BITGET_DEMO_API_PASSPHRASE`. مقادیر را بدون کوتیشن، فاصلهٔ ابتدا/انتها یا خط جدید ذخیره کن.
+5. برای این تست، مجوز Read روی حساب/فیوچرز فعال باشد. برداشت (Withdraw) را فعال نکن.
+6. مجدداً فقط Workflow با نام **Bitget Classic Demo Read-only Check** را اجرا کن. تا وقتی این تست موفق نشده، `TRADING_ENABLED` باید `false` بماند.
+
+اگر پس از ساخت کلید تازه هنوز `40012` دیدی، مطمئن شو سه مقدار از یک API Key واحد هستند و در حالت Demo/Classic ساخته شده‌اند. کلیدها را در چت، Issue، لاگ یا فایل مخزن ارسال نکن.
+
 ## ۳) GitHub Actions Variables
 
 برای شروع فقط این Variable را در `Settings → Secrets and variables → Actions → Variables` بساز:
