@@ -603,7 +603,191 @@ def patch_runner(source: str) -> str:
         "قابل‌اجرا در Bitget Classic Demo:",
         1,
     )
+    old_event_payload = '''                        "signals": market_scan["signals"],
+                        "errors": market_scan["errors"],
+                        "results": [
+                            {k: row.get(k) for k in (
+                                "rank", "name", "symbol", "analysis_status", "side",
+                                "close", "bar_close_ms", "error"
+                            ) if k in row}
+                            for row in market_scan["results"]
+                        ],'''
+    new_event_payload = '''                        "signals": market_scan["signals"][:20],
+                        "errors": market_scan["errors"][:20],
+                        "results_count": len(market_scan["results"]),
+                        "errors_omitted_from_event": max(0, len(market_scan["errors"]) - 20),'''
+    if old_event_payload in source:
+        source = source.replace(old_event_payload, new_event_payload, 1)
+    elif '"results_count": len(market_scan["results"]),' not in source:
+        raise RuntimeError("Runner market-scan event compaction anchor not found.")
+
     compile(source, "runner.py", "exec")
+    return source
+
+
+def patch_control_plane(source: str) -> str:
+    imports_old = '''import os
+from typing import Any, Optional
+
+import requests'''
+    imports_new = '''import json
+import os
+import re
+from typing import Any, Optional
+
+import requests'''
+    if imports_old in source:
+        source = source.replace(imports_old, imports_new, 1)
+    elif "import json\nimport os\nimport re\nfrom typing import Any, Optional" not in source:
+        raise RuntimeError("Control-plane import patch anchor not found.")
+
+    helper = r"""
+MAX_EVENT_CELL_CHARS = 45_000
+
+
+def compact_report_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Full market results remain in chunked snapshot_json; Events stores a summary.
+    compacted: list[dict[str, Any]] = []
+    for raw_event in list(events or [])[:100]:
+        item = dict(raw_event or {})
+        kind = str(item.get("kind") or "event")
+        message = str(item.get("message") or kind)[:4000]
+        raw_payload = item.get("payload")
+        payload = dict(raw_payload) if isinstance(raw_payload, dict) else {}
+
+        if kind == "top_coins_market_scan":
+            results = payload.pop("results", None)
+            if isinstance(results, list):
+                payload["results_count"] = len(results)
+            errors = payload.get("errors")
+            if isinstance(errors, list) and len(errors) > 20:
+                payload["errors_omitted_from_event"] = len(errors) - 20
+                payload["errors"] = errors[:20]
+            signals = payload.get("signals")
+            if isinstance(signals, list) and len(signals) > 20:
+                payload["signals_omitted_from_event"] = len(signals) - 20
+                payload["signals"] = signals[:20]
+
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded) > MAX_EVENT_CELL_CHARS:
+            payload = {
+                "_payload_truncated": True,
+                "original_payload_chars": len(encoded),
+                "retained_keys": list(payload.keys())[:40],
+            }
+            encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded) > MAX_EVENT_CELL_CHARS:
+            raise ControlPlaneError("An event payload could not be reduced below the Google Sheets cell-size limit.")
+
+        item["kind"] = kind
+        item["message"] = message
+        item["payload"] = payload
+        compacted.append(item)
+    return compacted
+"""
+    class_anchor = "class ControlPlane:\n"
+    if "def compact_report_events(" not in source:
+        if class_anchor not in source:
+            raise RuntimeError("ControlPlane class insertion anchor not found.")
+        source = source.replace(class_anchor, helper + "\n\n" + class_anchor, 1)
+
+    old_post = '''    def _post(self, payload: dict[str, Any], timeout: int = 25) -> dict[str, Any]:
+        body = {**payload, "key": self.token}
+        try:
+            response = self.session.post(self.base_url, json=body, timeout=timeout)
+            response.raise_for_status()
+            data = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise ControlPlaneError(f"Google Apps Script request failed: {exc}") from exc
+        if not isinstance(data, dict) or not data.get("ok"):
+            # Apps Script ContentService responses may report application errors with HTTP 200;
+            # inspect the JSON payload, not only the HTTP status.
+            raise ControlPlaneError(f"Google Apps Script returned an invalid response: {data}")
+        return data'''
+    new_post = '''    def _post(self, payload: dict[str, Any], timeout: int = 25) -> dict[str, Any]:
+        body = {**payload, "key": self.token}
+        try:
+            response = self.session.post(self.base_url, json=body, timeout=timeout)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise ControlPlaneError(f"Google Apps Script transport failed: {type(exc).__name__}") from exc
+        try:
+            data = response.json()
+        except ValueError as exc:
+            content_type = response.headers.get("Content-Type", "unknown").split(";")[0][:80]
+            raise ControlPlaneError(
+                f"Google Apps Script returned non-JSON (HTTP {response.status_code}; content-type={content_type})"
+            ) from exc
+        if not isinstance(data, dict):
+            raise ControlPlaneError("Google Apps Script returned a JSON value that is not an object.")
+        if not data.get("ok"):
+            error = str(data.get("error") or data.get("message") or data.get("hint") or "unspecified application error")
+            error = error.replace(self.token, "[redacted]")
+            error = re.sub(r"(?<![A-Za-z0-9])[A-Za-z0-9_-]{25,}(?![A-Za-z0-9])", "[redacted-id]", error)
+            raise ControlPlaneError("Google Apps Script application error: " + error[:300])
+        return data'''
+    if old_post in source:
+        source = source.replace(old_post, new_post, 1)
+    elif "Google Apps Script application error:" not in source:
+        raise RuntimeError("ControlPlane _post patch anchor not found.")
+
+    if '"events": events,' in source:
+        source = source.replace('"events": events,', '"events": compact_report_events(events),', 1)
+    elif '"events": compact_report_events(events),' not in source:
+        raise RuntimeError("ControlPlane report event patch anchor not found.")
+
+    compile(source, "control_plane.py", "exec")
+    return source
+
+
+def patch_market_scan_tests(source: str) -> str:
+    if "from control_plane import compact_report_events" not in source:
+        source = source.replace(
+            "from runner import market_scan_status, read_bool_env, scan_top_coins\n",
+            "from runner import market_scan_status, read_bool_env, scan_top_coins\nfrom control_plane import compact_report_events\nimport json\n",
+            1,
+        )
+    test_block = r"""
+
+class ControlPlanePayloadTests(unittest.TestCase):
+    def test_market_scan_event_is_compacted_below_google_sheets_cell_limit(self):
+        source_rows = [
+            {"symbol": f"COIN{i:03d}USDT", "error": "x" * 900}
+            for i in range(100)
+        ]
+        events = [{
+            "kind": "top_coins_market_scan",
+            "message": "market scan complete",
+            "payload": {
+                "results": source_rows,
+                "errors": source_rows,
+                "signals": source_rows,
+                "analyzed_count": 100,
+            },
+        }]
+        result = compact_report_events(events)
+        payload = result[0]["payload"]
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded), 45_000)
+        self.assertEqual(payload["results_count"], 100)
+        self.assertEqual(payload["errors_omitted_from_event"], 80)
+        self.assertEqual(len(payload["errors"]), 20)
+        self.assertNotIn("results", payload)
+
+    def test_small_events_are_preserved_without_truncation(self):
+        events = [{"kind": "run_end", "message": "done", "payload": {"status": "success"}}]
+        result = compact_report_events(events)
+        self.assertEqual(result[0]["payload"], {"status": "success"})
+        self.assertEqual(result[0]["message"], "done")
+"""
+    if "class ControlPlanePayloadTests" not in source:
+        anchor = "\n\nif __name__ == '__main__':"
+        if anchor not in source:
+            anchor = '\n\nif __name__ == "__main__":'
+        if anchor not in source:
+            raise RuntimeError("Market-scan test insertion anchor not found.")
+        source = source.replace(anchor, test_block + anchor, 1)
+    compile(source, "tests/test_market_scan.py", "exec")
     return source
 
 def safe_runtime_path(root: Path, archive_name: str) -> Path:
@@ -652,12 +836,15 @@ def main() -> int:
         universe_candidates = [n for n in names if PurePosixPath(n).name == "universe.py"]
         bitget_candidates = [n for n in names if PurePosixPath(n).name == "bitget_demo.py"]
         runner_candidates = [n for n in names if PurePosixPath(n).name == "runner.py"]
+        control_candidates = [n for n in names if PurePosixPath(n).name == "control_plane.py"]
+        market_scan_test_candidates = [n for n in names if n.endswith("tests/test_market_scan.py")]
         universe_test_candidates = [n for n in names if n.endswith("tests/test_universe.py")]
         bitget_test_candidates = [n for n in names if n.endswith("tests/test_bitget_demo.py")]
         if (len(config_candidates) != 1 or len(test_candidates) != 1
                 or len(universe_candidates) != 1 or len(bitget_candidates) != 1
                 or len(runner_candidates) != 1 or len(universe_test_candidates) != 1
-                or len(bitget_test_candidates) != 1):
+                or len(bitget_test_candidates) != 1 or len(control_candidates) != 1
+                or len(market_scan_test_candidates) != 1):
             raise RuntimeError("Required runtime source/test files were not found uniquely in the payload.")
         config_name = config_candidates[0]
         tests_name = test_candidates[0]
@@ -666,6 +853,8 @@ def main() -> int:
         runner_name = runner_candidates[0]
         universe_test_name = universe_test_candidates[0]
         bitget_test_name = bitget_test_candidates[0]
+        control_name = control_candidates[0]
+        market_scan_test_name = market_scan_test_candidates[0]
 
         with zipfile.ZipFile(rebuilt_zip, "w") as target_zip:
             for info in source_zip.infolist():
@@ -732,6 +921,12 @@ def main() -> int:
                 elif info.filename == runner_name:
                     data = patch_runner(data.decode("utf-8")).encode("utf-8")
 
+                elif info.filename == control_name:
+                    data = patch_control_plane(data.decode("utf-8")).encode("utf-8")
+
+                elif info.filename == market_scan_test_name:
+                    data = patch_market_scan_tests(data.decode("utf-8")).encode("utf-8")
+
                 elif info.filename == universe_test_name:
                     compile(UNIVERSE_TESTS, "tests/test_universe.py", "exec")
                     data = UNIVERSE_TESTS.encode("utf-8")
@@ -797,6 +992,7 @@ def main() -> int:
     print("[PASS] Portfolio limits: 7 concurrent positions; 4 new entries per analysis run.")
     print("[INFO] Portfolio risk ceiling derived from existing 6.5% per-position setting: 45.5% equity.")
     print("[INFO] Aggregate notional ceiling remains 9.0x equity (shared average 1.2857x per slot).")
+    print("[PASS] Compact event payloads protect Google Sheets event cells; full scan detail remains in chunked snapshot storage.")
     print("[PASS] Updated offline tests included; runtime extracted only to temporary runner storage.")
     return 0
 
