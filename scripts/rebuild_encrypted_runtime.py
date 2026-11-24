@@ -997,6 +997,7 @@ def main() -> int:
     print("[INFO] Portfolio risk ceiling derived from existing 6.5% per-position setting: 45.5% equity.")
     print("[INFO] Aggregate notional ceiling remains 9.0x equity (shared average 1.2857x per slot).")
     print("[PASS] Compact event payloads protect Google Sheets event cells; full scan detail remains in chunked snapshot storage.")
+    print("[PASS] Apps Script application errors are classified without exposing secrets.")
     print("[PASS] Updated offline tests included; runtime extracted only to temporary runner storage.")
     return 0
 
