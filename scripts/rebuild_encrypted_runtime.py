@@ -483,6 +483,55 @@ def patch_bitget_demo(source: str) -> str:
     compile(updated, "bitget_demo.py", "exec")
     return updated
 
+def patch_bitget_tests(source: str) -> str:
+    old_name = "def test_get_usdt_perpetual_contracts_uses_classic_v2_demo_market_route(self):"
+    new_name = "def test_get_usdt_perpetual_contracts_uses_public_classic_v2_market_route(self):"
+    source = source.replace(old_name, new_name, 1)
+
+    start = source.find("    def test_get_usdt_perpetual_contracts_uses_public_classic_v2_market_route(")
+    end = source.find("\n    def test_demo_header_is_kept_on_demo_market_requests(", start)
+    if start < 0 or end < 0:
+        raise RuntimeError("Bitget public-catalog test patch anchor not found.")
+    block = source[start:end]
+    block = block.replace("self.assertTrue(kwargs.get(\\"demo_header\\"))",
+                          "self.assertFalse(kwargs.get(\\"demo_header\\"))", 1)
+    source = source[:start] + block + source[end:]
+
+    demo_test = '''    def test_get_demo_usdt_perpetual_contracts_uses_classic_v2_demo_market_route(self):
+        self.client._request = Mock(return_value=[{"symbol": "BTCUSDT", "baseCoin": "BTC"}])
+        rows = self.client.get_demo_usdt_perpetual_contracts()
+        self.assertEqual(rows[0]["symbol"], "BTCUSDT")
+        args, kwargs = self.client._request.call_args
+        self.assertEqual(args[1], "/api/v2/mix/market/contracts")
+        self.assertEqual(args[2]["productType"], "USDT-FUTURES")
+        self.assertTrue(kwargs.get("demo_header"))
+
+'''
+    marker = "    def test_demo_header_is_kept_on_demo_market_requests(self):"
+    if "def test_get_demo_usdt_perpetual_contracts_uses_classic_v2_demo_market_route(" not in source:
+        if marker not in source:
+            raise RuntimeError("Bitget Demo-catalog test insertion anchor not found.")
+        source = source.replace(marker, demo_test + marker, 1)
+
+    kstart = source.find("    def test_get_klines_normalizes_and_sorts_oldest_first(")
+    kend = source.find("\n    def test_get_instrument_rules(", kstart)
+    if kstart < 0 or kend < 0:
+        raise RuntimeError("Bitget public-kline test patch anchor not found.")
+    kblock = source[kstart:kend]
+    expected = '        self.assertEqual(args[2]["productType"], "USDT-FUTURES")'
+    if 'self.assertFalse(kwargs.get("demo_header"))' not in kblock:
+        if expected not in kblock:
+            raise RuntimeError("Bitget public-kline assertion anchor not found.")
+        kblock = kblock.replace(
+            expected,
+            expected + '\\n        self.assertFalse(kwargs.get("demo_header"))',
+            1,
+        )
+        source = source[:kstart] + kblock + source[kend:]
+
+    compile(source, "tests/test_bitget_demo.py", "exec")
+    return source
+
 def patch_universe(source: str) -> str:
     source = source.replace(
         '"""Static ranked candidate universe; no third-party ranking API is used."""',
@@ -590,9 +639,11 @@ def main() -> int:
         bitget_candidates = [n for n in names if PurePosixPath(n).name == "bitget_demo.py"]
         runner_candidates = [n for n in names if PurePosixPath(n).name == "runner.py"]
         universe_test_candidates = [n for n in names if n.endswith("tests/test_universe.py")]
+        bitget_test_candidates = [n for n in names if n.endswith("tests/test_bitget_demo.py")]
         if (len(config_candidates) != 1 or len(test_candidates) != 1
                 or len(universe_candidates) != 1 or len(bitget_candidates) != 1
-                or len(runner_candidates) != 1 or len(universe_test_candidates) != 1):
+                or len(runner_candidates) != 1 or len(universe_test_candidates) != 1
+                or len(bitget_test_candidates) != 1):
             raise RuntimeError("Required runtime source/test files were not found uniquely in the payload.")
         config_name = config_candidates[0]
         tests_name = test_candidates[0]
@@ -600,6 +651,7 @@ def main() -> int:
         bitget_name = bitget_candidates[0]
         runner_name = runner_candidates[0]
         universe_test_name = universe_test_candidates[0]
+        bitget_test_name = bitget_test_candidates[0]
 
         with zipfile.ZipFile(rebuilt_zip, "w") as target_zip:
             for info in source_zip.infolist():
@@ -669,6 +721,9 @@ def main() -> int:
                 elif info.filename == universe_test_name:
                     compile(UNIVERSE_TESTS, "tests/test_universe.py", "exec")
                     data = UNIVERSE_TESTS.encode("utf-8")
+
+                elif info.filename == bitget_test_name:
+                    data = patch_bitget_tests(data.decode("utf-8")).encode("utf-8")
 
                 target_zip.writestr(info, data)
 
