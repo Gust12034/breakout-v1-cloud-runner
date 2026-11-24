@@ -114,7 +114,6 @@ BITGET_MARKET_METHODS = r"""
         return data
 
 """
-"""
 
 BITGET_UNIVERSE_FUNCTION = r"""
 def build_top_coin_universe(
@@ -296,7 +295,6 @@ def build_top_coin_universe(
         "ranking_metric": "static market-cap snapshot",
     }
 """
-"""
 
 UNIVERSE_TESTS = r"""
 import unittest
@@ -449,7 +447,6 @@ class BitgetFuturesUniverseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-"""
 """
 
 def patch_bitget_demo(source: str) -> str:
