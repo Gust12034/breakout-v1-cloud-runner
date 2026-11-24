@@ -536,8 +536,8 @@ def patch_runner(source: str) -> str:
         source = source.replace(old_meta, new_meta, 1)
 
     source = source.replace(
-        "f\\"قابل معامله در Bitget: {universe.get('trade_eligible_count', 0)} نماد\\\\n\\"",
-        "f\\"قابل‌اجرا در Bitget Classic Demo: {universe.get('trade_eligible_count', 0)} نماد\\\\n\\"",
+        "قابل معامله در Bitget:",
+        "قابل‌اجرا در Bitget Classic Demo:",
         1,
     )
     compile(source, "runner.py", "exec")
