@@ -413,7 +413,7 @@ def patch_universe(source: str) -> str:
 
 def patch_runner(source: str) -> str:
     old_heading = 'f"📊 اسکن بازار بر اساس فهرست ثابت ۱۰۰ کوین انجام شد.\\n"'
-    new_heading = '(f"📊 اسکن ۱۰۰ قرارداد فعال Bitget USDT-Futures بر اساس حجم ۲۴ساعته انجام شد.\\n" if signal_data_source == "bitget_linear" else f"📊 اسکن بازار بر اساس فهرست ثابت ۱۰۰ کوین انجام شد.\\n")'
+    new_heading = '(f"📊 اسکن ۱۰۰ قرارداد فعال Bitget USDT-Futures بر اساس حجم ۲۴ساعته انجام شد.\\n" if signal_data_source == "bitget_linear" else f"📊 اسکن بازار بر اساس فهرست ثابت ۱۰۰ کوین انجام شد.\\n") +\n                    '
     if old_heading in source:
         source = source.replace(old_heading, new_heading, 1)
     elif new_heading not in source:
