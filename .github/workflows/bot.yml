@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      TRADING_ENABLED: ${{ vars.TRADING_ENABLED || 'false' }}
+      TRADING_ENABLED: 'false'  # temporary safety lock while control-plane final reporting is validated
       PYTHONUNBUFFERED: '1'
       LIVE_TRADING: 'false'
       BITGET_DEMO_API_KEY: ${{ secrets.BITGET_DEMO_API_KEY }}
