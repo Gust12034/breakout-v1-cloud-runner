@@ -493,8 +493,8 @@ def patch_bitget_tests(source: str) -> str:
     if start < 0 or end < 0:
         raise RuntimeError("Bitget public-catalog test patch anchor not found.")
     block = source[start:end]
-    block = block.replace("self.assertTrue(kwargs.get(\\"demo_header\\"))",
-                          "self.assertFalse(kwargs.get(\\"demo_header\\"))", 1)
+    block = block.replace('self.assertTrue(kwargs.get("demo_header"))',
+                          'self.assertFalse(kwargs.get("demo_header"))', 1)
     source = source[:start] + block + source[end:]
 
     demo_test = '''    def test_get_demo_usdt_perpetual_contracts_uses_classic_v2_demo_market_route(self):
