@@ -567,7 +567,21 @@ def patch_runner(source: str) -> str:
                     else:
                         saved_universe = strategy_state.get("active_trade_universe") or []
                         symbols = list(dict.fromkeys(str(x).upper() for x in saved_universe if x)) or configured_symbols
-                    snapshot["symbols"] = list(symbols)'''
+                    snapshot["symbols"] = list(symbols)
+                    if universe.get("trade_catalog_error"):
+                        scan_error = "Classic Demo tradable-market catalog could not be verified; new entries are blocked."
+                        events.append(event(
+                            "demo_execution_universe_unavailable",
+                            "🚨 فهرست قراردادهای قابل سفارش در Bitget Classic Demo قابل بررسی نبود؛ تحلیل بازار انجام شد اما ورود جدید مسدود است.",
+                            {"error": universe.get("trade_catalog_error"), "analysis_symbols": len(universe.get("symbols", []))},
+                        ))
+                    elif not trade_symbols:
+                        scan_error = "No selected public futures contracts are available for Classic Demo execution; new entries are blocked."
+                        events.append(event(
+                            "demo_execution_universe_empty",
+                            "⚠️ اسکن بازار انجام شد، اما هیچ‌یک از قراردادهای منتخب در Bitget Classic Demo قابل سفارش نبودند؛ ورود جدید مسدود است.",
+                            {"analysis_symbols": len(universe.get("symbols", [])), "demo_trade_symbols": 0},
+                        ))'''
     if old_trade_block in source:
         source = source.replace(old_trade_block, new_trade_block, 1)
     elif 'snapshot["analysis_symbols"] = list(universe.get("symbols", []))' not in source:
