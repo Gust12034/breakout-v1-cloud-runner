@@ -64,13 +64,15 @@
 
 این توکن برای خواندن وضعیت Workflowها و اجرای `workflow_dispatch` از Apps Script لازم است. توکن را داخل GitHub Variable یا فایل کد قرار نده.
 
-## ۵) افزودن زمان‌بند به Google Apps Script
+## ۵) به‌روزرسانی Control Plane و افزودن زمان‌بند در Google Apps Script
 
-در همان Google Sheet و پروژهٔ Apps Script فعلی (همانی که فایل `Code.gs`، وب‌اپ `/exec`، توکن کنترل و تب‌های وضعیت را دارد):
+در همان Google Sheet و پروژهٔ Apps Script فعلی کار کن؛ همان پروژه‌ای که وب‌اپ `/exec`، توکن کنترل، تب‌های وضعیت و تنظیمات Telegram را دارد. در این مخزن دو فایل Apps Script وظایف جدا دارند: `Code.gs` برای دریافت گزارش‌ها و ذخیره در Sheets/Telegram، و `CloudScheduler.gs` برای زمان‌بندی و Dispatch کردن Workflowها.
 
-1. Apps Script Editor → دکمهٔ `+` → `Script`؛ نام فایل جدید را `CloudScheduler` بگذار.
-2. فایل `google-apps-script/CloudScheduler.gs` همین مخزن را کامل در آن کپی و Save کن. `Code.gs` فعلی را حذف یا جایگزین نکن.
-3. به `Project Settings → Script properties` برو و موارد زیر را اضافه کن:
+1. در Apps Script Editor فایل موجود `Code.gs` را باز کن و محتوای کامل آن را با فایل `google-apps-script/Code.gs` همین مخزن جایگزین کن. فقط کد را جایگزین کن، نه Script Properties یا داده‌های Google Sheet را. سپس Save کن.
+2. از `Deploy → Manage deployments`، Web App فعلی را Edit کن، گزینهٔ `New version` را انتخاب و Deploy کن. Deployment موجود را ویرایش کن تا URL فعلی `/exec` ثابت بماند؛ Deployment تازه نساز. اگر URL ناخواسته تغییر کرد، Secret مربوط به `GOOGLE_APPS_SCRIPT_URL` در GitHub باید با URL جدید به‌روزرسانی شود.
+3. در همان پروژه، از Apps Script Editor روی `+` → `Script` بزن و فایل جدیدی به نام `CloudScheduler` بساز.
+4. محتوای کامل فایل `google-apps-script/CloudScheduler.gs` همین مخزن را در فایل جدید کپی و Save کن. این فایل باید جدا از `Code.gs` باقی بماند؛ آن را روی `Code.gs` کپی نکن.
+5. به `Project Settings → Script properties` برو و موارد زیر را اضافه کن:
 
 | Property | Value |
 |---|---|
@@ -81,12 +83,12 @@
 | `B1D_BOT_WORKFLOW` | `bot.yml` |
 | `B1D_MONITOR_WORKFLOW` | `position-monitor.yml` |
 
-4. Propertyهای موجود مثل `SPREADSHEET_ID`، `CONTROL_PLANE_TOKEN`، `TELEGRAM_BOT_TOKEN` و `TELEGRAM_CHAT_ID` را دست نزن.
-5. از فهرست توابع Apps Script، `testBreakoutGitHubConnection` را اجرا کن. باید `ok: true` و وضعیت `active` برای هر دو Workflow بگیری.
-6. بعد `installBreakoutCloudScheduler` را اجرا کن و دسترسی Trigger را تأیید کن. این تابع دقیقاً یک Trigger پنج‌دقیقه‌ای ایجاد می‌کند.
-7. برای بررسی، `getBreakoutCloudSchedulerStatus` و برای توقف زمان‌بند `removeBreakoutCloudScheduler` را اجرا کن.
+6. Propertyهای موجود مثل `SPREADSHEET_ID`، `CONTROL_PLANE_TOKEN`، `TELEGRAM_BOT_TOKEN` و `TELEGRAM_CHAT_ID` را دست نزن.
+7. از فهرست توابع Apps Script، `testBreakoutGitHubConnection` را اجرا کن. باید `ok: true` و وضعیت `active` برای هر دو Workflow بگیری.
+8. بعد `installBreakoutCloudScheduler` را اجرا کن و دسترسی Trigger را تأیید کن. این تابع دقیقاً یک Trigger پنج‌دقیقه‌ای ایجاد می‌کند.
+9. برای بررسی، `getBreakoutCloudSchedulerStatus` و برای توقف زمان‌بند `removeBreakoutCloudScheduler` را اجرا کن.
 
-نیازی به Deploy مجدد وب‌اپ قبلی نیست؛ این فایل صرفاً GitHub را زمان‌بندی و Dispatch می‌کند.
+با تغییر `Code.gs` باید نسخهٔ جدید Web App Deploy شود؛ افزودن یا تغییر `CloudScheduler.gs` به‌تنهایی نیازی به Deploy مجدد Web App ندارد.
 
 ## ۶) آزمون اجباری، پیش از هر معامله
 
