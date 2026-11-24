@@ -88,18 +88,18 @@ BITGET_MARKET_METHODS = r"""
         # Return the public USDT-FUTURES contract catalog for universe filtering.
         data = self._request("GET", "/api/v2/mix/market/contracts", {
             "productType": PRODUCT_TYPE,
-        }, demo_header=True)
+        }, demo_header=False)
         if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
-            raise BitgetAPIError("Bitget Classic contract catalog returned an unexpected response")
+            raise BitgetAPIError("Bitget public USDT-FUTURES contract catalog returned an unexpected response")
         return data
 
     def get_usdt_perpetual_tickers(self) -> list[dict[str, Any]]:
         # Return all Classic USDT-FUTURES tickers, including 24h quote volume.
         data = self._request("GET", "/api/v2/mix/market/tickers", {
             "productType": PRODUCT_TYPE,
-        }, demo_header=True)
+        }, demo_header=False)
         if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
-            raise BitgetAPIError("Bitget Classic USDT-FUTURES ticker catalog returned an unexpected response")
+            raise BitgetAPIError("Bitget public USDT-FUTURES ticker catalog returned an unexpected response")
         return data
 
 """
