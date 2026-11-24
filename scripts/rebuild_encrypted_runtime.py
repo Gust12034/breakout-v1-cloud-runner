@@ -524,7 +524,7 @@ def patch_bitget_tests(source: str) -> str:
             raise RuntimeError("Bitget public-kline assertion anchor not found.")
         kblock = kblock.replace(
             expected,
-            expected + '\\n        self.assertFalse(kwargs.get("demo_header"))',
+            expected + '\n        self.assertFalse(kwargs.get("demo_header"))',
             1,
         )
         source = source[:kstart] + kblock + source[kend:]
