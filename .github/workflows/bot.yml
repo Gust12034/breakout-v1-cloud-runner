@@ -29,7 +29,7 @@ jobs:
       CONTROL_PLANE_TOKEN: ${{ secrets.CONTROL_PLANE_TOKEN }}
       SYMBOLS: ${{ vars.TRADE_SYMBOLS || vars.SYMBOLS || 'BTCUSDT' }}
       TRADE_SYMBOLS: ${{ vars.TRADE_SYMBOLS || vars.SYMBOLS || 'BTCUSDT' }}
-      SIGNAL_DATA_SOURCE: ${{ vars.SIGNAL_DATA_SOURCE || 'binance_spot' }}
+      SIGNAL_DATA_SOURCE: ${{ vars.SIGNAL_DATA_SOURCE || 'bitget_linear' }}
       LEN_N: ${{ vars.LEN_N || '48' }}
       VOL_MULT: ${{ vars.V1D_VOL_MULT || '1.5' }}
       ADX_MAX: ${{ vars.V1D_ADX_MAX || '0.0' }}
