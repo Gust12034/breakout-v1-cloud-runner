@@ -719,8 +719,19 @@ def compact_report_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             data = response.json()
         except ValueError as exc:
             content_type = response.headers.get("Content-Type", "unknown").split(";")[0][:80]
+            redirect_chain = ",".join(str(item.status_code) for item in response.history) or "none"
+            hint = response.text[:500]
+            hint = re.sub(r"<[^>]*>", " ", hint)
+            hint = re.sub(r"https?://\S+", "[url]", hint)
+            hint = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[email]", hint)
+            hint = hint.replace(self.token, "[redacted]")
+            hint = re.sub(r"(?<![A-Za-z0-9])[A-Za-z0-9_-]{25,}(?![A-Za-z0-9])", "[redacted-id]", hint)
+            hint = " ".join(hint.split())[:180] or "empty response body"
+            request_bytes = len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
             raise ControlPlaneError(
-                f"Google Apps Script returned non-JSON (HTTP {response.status_code}; content-type={content_type})"
+                f"Google Apps Script returned non-JSON (HTTP {response.status_code}; "
+                f"content-type={content_type}; redirects={redirect_chain}; "
+                f"request_bytes={request_bytes}; response_hint={hint})"
             ) from exc
         if not isinstance(data, dict):
             raise ControlPlaneError("Google Apps Script returned a JSON value that is not an object.")
