@@ -489,12 +489,16 @@ def patch_bitget_tests(source: str) -> str:
     source = source.replace(old_name, new_name, 1)
 
     start = source.find("    def test_get_usdt_perpetual_contracts_uses_public_classic_v2_market_route(")
-    end = source.find("\n    def test_demo_header_is_kept_on_demo_market_requests(", start)
+    end = source.find("\n    def ", start + 1)
     if start < 0 or end < 0:
         raise RuntimeError("Bitget public-catalog test patch anchor not found.")
     block = source[start:end]
-    block = block.replace('self.assertTrue(kwargs.get("demo_header"))',
-                          'self.assertFalse(kwargs.get("demo_header"))', 1)
+    true_assertion = 'self.assertTrue(kwargs.get("demo_header"))'
+    false_assertion = 'self.assertFalse(kwargs.get("demo_header"))'
+    if true_assertion in block:
+        block = block.replace(true_assertion, false_assertion, 1)
+    elif false_assertion not in block:
+        raise RuntimeError("Public Bitget catalog demo-header assertion anchor not found.")
     source = source[:start] + block + source[end:]
 
     demo_test = '''    def test_get_demo_usdt_perpetual_contracts_uses_classic_v2_demo_market_route(self):
