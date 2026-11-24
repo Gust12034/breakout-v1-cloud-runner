@@ -108,9 +108,22 @@ jobs:
                   reason = "Spreadsheet configuration/access failed; verify SPREADSHEET_ID and the bound spreadsheet."
               elif "google_apps_script_url" in message or "control_plane_token" in message:
                   reason = "Required Script URL or control-plane token is missing/invalid in GitHub Actions Secrets."
-              elif "json" in message or "invalid response" in message:
-                  reason = "Apps Script returned a non-JSON or invalid application response; verify the deployed /exec URL and deployment version."
-              elif "request failed" in message:
+              elif "google apps script application error" in message:
+                  if "unexpected headers in sheet events" in message:
+                      reason = "Apps Script cannot append the final report because the Events sheet header row differs from the expected schema."
+                  elif "unexpected headers in sheet positions" in message:
+                      reason = "Apps Script cannot update the final report because the Positions sheet header row differs from the expected schema."
+                  elif "cell-size limit" in message or "50000" in message or "50,000" in message:
+                      reason = "Apps Script rejected an oversized Google Sheets cell; report payload compaction has been enabled."
+                  elif "lock" in message or "timed out" in message:
+                      reason = "Apps Script could not acquire its report lock in time; another script execution may be overlapping."
+                  elif "spreadsheet" in message:
+                      reason = "Apps Script could not write the final report to the configured spreadsheet; inspect Apps Script Executions."
+                  else:
+                      reason = "Apps Script rejected the final report while writing state/events; inspect the Apps Script execution error."
+              elif "returned non-json" in message or "json" in message or "invalid response" in message:
+                  reason = "Apps Script returned non-JSON or a malformed response; verify the /exec deployment and its execution log."
+              elif "transport failed" in message or "request failed" in message:
                   reason = "Network/transport failure while contacting Apps Script."
               else:
                   reason = "Control-plane initialization/read failed (" + type(exc).__name__ + "); detailed data withheld."
