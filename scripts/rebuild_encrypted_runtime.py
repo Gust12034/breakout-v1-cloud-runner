@@ -82,6 +82,351 @@ def replace_test_assertion(source: str, old: str, new: str) -> str:
     raise RuntimeError("Portfolio test assertions did not match the expected old or new form.")
 
 
+
+BITGET_MARKET_METHODS = r"""
+    def get_usdt_perpetual_contracts(self) -> list[dict[str, Any]]:
+        # Return the public USDT-FUTURES contract catalog for universe filtering.
+        data = self._request("GET", "/api/v2/mix/market/contracts", {
+            "productType": PRODUCT_TYPE,
+        }, demo_header=True)
+        if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+            raise BitgetAPIError("Bitget Classic contract catalog returned an unexpected response")
+        return data
+
+    def get_usdt_perpetual_tickers(self) -> list[dict[str, Any]]:
+        # Return all Classic USDT-FUTURES tickers, including 24h quote volume.
+        data = self._request("GET", "/api/v2/mix/market/tickers", {
+            "productType": PRODUCT_TYPE,
+        }, demo_header=True)
+        if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+            raise BitgetAPIError("Bitget Classic USDT-FUTURES ticker catalog returned an unexpected response")
+        return data
+
+"""
+
+BITGET_UNIVERSE_FUNCTION = r"""
+def build_top_coin_universe(
+    bitget_client: Any,
+    signal_data_source: str = "binance_spot",
+    top_n: int = 100,
+    binance_spot_symbols: set[str] | None = None,
+) -> dict[str, Any]:
+    # Build either a static Binance spot universe or a live Bitget USDT-perpetual universe.
+    source = str(signal_data_source).lower().strip()
+    if source not in {"binance_spot", "bitget_linear"}:
+        raise UniverseError("SIGNAL_DATA_SOURCE must be binance_spot or bitget_linear")
+    if not 1 <= int(top_n) <= len(STATIC_TOP_100):
+        raise UniverseError(f"TOP_COINS_COUNT must be between 1 and {len(STATIC_TOP_100)}")
+
+    contract_map = _valid_contract_map(bitget_client.get_usdt_perpetual_contracts())
+    if not contract_map:
+        raise UniverseError("Bitget returned no active USDT perpetual contracts")
+
+    # Futures mode ranks only actual, active Bitget USDT-M perpetual contracts.
+    # It deliberately does not pretend that a spot pair is a futures contract.
+    if source == "bitget_linear":
+        ticker_rows = bitget_client.get_usdt_perpetual_tickers()
+        ticker_by_symbol: dict[str, tuple[dict[str, Any], float]] = {}
+        for row in ticker_rows:
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            try:
+                quote_volume = float(row.get("quoteVolume") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if quote_volume > 0:
+                ticker_by_symbol[symbol] = (row, quote_volume)
+
+        candidates: list[dict[str, Any]] = []
+        for base, contract in contract_map.items():
+            if base in STABLECOIN_SYMBOLS or str(contract.get("isRwa") or "").upper() == "YES":
+                continue
+            symbol = str(contract.get("symbol") or f"{base}USDT").upper()
+            ticker_data = ticker_by_symbol.get(symbol)
+            if ticker_data is None:
+                continue
+            ticker, quote_volume = ticker_data
+            candidates.append({
+                "rank": 0,
+                "market_cap_rank": None,
+                "coin_id": base.lower(),
+                "name": str(contract.get("baseCoin") or base),
+                "coin_symbol": base,
+                "symbol": symbol,
+                "trade_eligible": True,
+                "execution_symbol": symbol,
+                "market_cap_usd": None,
+                "quote_volume_24h_usdt": quote_volume,
+                "last_price": float(ticker.get("lastPr") or 0.0),
+                "source": "bitget_usdt_futures_quote_volume_24h",
+            })
+
+        candidates.sort(
+            key=lambda row: (-float(row["quote_volume_24h_usdt"]), str(row["symbol"]))
+        )
+        if len(candidates) < int(top_n):
+            raise UniverseError(
+                f"Bitget has only {len(candidates)} active, liquid USDT perpetual contracts "
+                f"with valid 24h quote volume; {top_n} are required. No partial futures universe is accepted."
+            )
+
+        selected = candidates[:int(top_n)]
+        for rank, row in enumerate(selected, start=1):
+            row["rank"] = rank
+
+        trade_symbols = [row["execution_symbol"] for row in selected]
+        return {
+            "source": "Bitget USDT-M perpetual futures; top symbols by 24h quote volume",
+            "signal_data_source": source,
+            "requested_count": int(top_n),
+            "selected_count": len(selected),
+            "pages_fetched": 0,
+            "symbols": [row["symbol"] for row in selected],
+            "trade_symbols": trade_symbols,
+            "trade_eligible_count": len(trade_symbols),
+            "non_tradeable_symbols": [],
+            "coins": selected,
+            "universe_snapshot_date": None,
+            "ranking_is_static": False,
+            "ranking_metric": "24h quote volume (USDT)",
+        }
+
+    # Binance Spot mode retains the checked-in Top-100 snapshot for analysis.
+    if binance_spot_symbols is None:
+        binance_spot_symbols = BinanceSpotData().get_available_usdt_spot_symbols()
+    spot_pairs = {str(x).upper() for x in binance_spot_symbols}
+
+    selected: list[dict[str, Any]] = []
+    trade_symbols: list[str] = []
+    unavailable_spot: list[str] = []
+    unavailable_bitget: list[str] = []
+    for candidate in STATIC_TOP_100:
+        ticker = candidate["symbol"]
+        if ticker in STABLECOIN_SYMBOLS:
+            continue
+        pair = f"{ticker}USDT"
+        if pair not in spot_pairs:
+            unavailable_spot.append(pair)
+            continue
+        contract = contract_map.get(ticker)
+        if contract:
+            execution_pair = str(contract.get("symbol") or pair).upper()
+            trade_symbols.append(execution_pair)
+        else:
+            unavailable_bitget.append(pair)
+            execution_pair = None
+        selected.append({
+            "rank": int(candidate["rank"]),
+            "market_cap_rank": int(candidate["rank"]),
+            "coin_id": ticker.lower(),
+            "name": candidate["name"],
+            "coin_symbol": ticker,
+            "symbol": pair,
+            "trade_eligible": bool(execution_pair),
+            "execution_symbol": execution_pair,
+            "market_cap_usd": None,
+            "source": "binance_spot_usdt_top100_snapshot_2026-11-19",
+        })
+        if len(selected) == int(top_n):
+            break
+
+    if len(selected) != int(top_n):
+        raise UniverseError(
+            f"Static Top-100 list produced only {len(selected)}/{top_n} analysis symbols. "
+            f"Missing Binance Spot USDT pairs: {', '.join(unavailable_spot[:12]) or 'none'}. "
+            "No partial analysis universe is accepted."
+        )
+
+    return {
+        "source": "Binance Spot USDT Top-100 snapshot (2026-11-19); Binance Spot USDT analysis; Bitget USDT perpetual trade eligibility",
+        "signal_data_source": source,
+        "requested_count": int(top_n),
+        "selected_count": len(selected),
+        "pages_fetched": 0,
+        "symbols": [row["symbol"] for row in selected],
+        "trade_symbols": trade_symbols[:int(top_n)],
+        "trade_eligible_count": len(trade_symbols[:int(top_n)]),
+        "non_tradeable_symbols": unavailable_bitget,
+        "coins": selected,
+        "universe_snapshot_date": "2026-11-19",
+        "ranking_is_static": True,
+        "ranking_metric": "static market-cap snapshot",
+    }
+"""
+
+UNIVERSE_TESTS = r"""
+import unittest
+
+from universe import (
+    STATIC_TOP_100, STABLECOIN_SYMBOLS, UniverseError,
+    _valid_contract_map, build_top_coin_universe,
+)
+
+
+class FakeBitget:
+    def __init__(self, contracts, tickers=None):
+        self.contracts = contracts
+        self.tickers = list(tickers or [])
+        self.calls = 0
+        self.ticker_calls = 0
+
+    def get_usdt_perpetual_contracts(self):
+        self.calls += 1
+        return self.contracts
+
+    def get_usdt_perpetual_tickers(self):
+        self.ticker_calls += 1
+        return self.tickers
+
+
+def make_contract(symbol):
+    base = symbol[:-4]
+    return {"symbol": symbol, "baseCoin": base, "quoteCoin": "USDT",
+            "symbolStatus": "normal", "symbolType": "perpetual"}
+
+
+class StaticUniverseTests(unittest.TestCase):
+    def test_static_candidate_list_has_exactly_100_unique_symbols(self):
+        symbols = [row["symbol"] for row in STATIC_TOP_100]
+        self.assertEqual(len(symbols), 100)
+        self.assertEqual(len(set(symbols)), 100)
+
+    def test_static_binance_universe_uses_only_exchange_metadata(self):
+        candidates = [row["symbol"] for row in STATIC_TOP_100 if row["symbol"] not in STABLECOIN_SYMBOLS]
+        contracts = [make_contract(f"{s}USDT") for s in candidates[:5]]
+        spot = {f"{s}USDT" for s in candidates[:5]}
+        client = FakeBitget(contracts)
+        result = build_top_coin_universe(client, top_n=5, binance_spot_symbols=spot)
+        self.assertEqual(result["selected_count"], 5)
+        self.assertEqual(result["symbols"], [f"{s}USDT" for s in candidates[:5]])
+        self.assertTrue(result["ranking_is_static"])
+        self.assertEqual(result["pages_fetched"], 0)
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(client.ticker_calls, 0)
+
+    def test_binance_spot_analysis_trades_only_if_bitget_perpetual_exists(self):
+        candidates = [row["symbol"] for row in STATIC_TOP_100 if row["symbol"] not in STABLECOIN_SYMBOLS]
+        contracts = [make_contract(f"{s}USDT") for s in candidates[:3]]
+        client = FakeBitget(contracts)
+        result = build_top_coin_universe(
+            client, top_n=2,
+            binance_spot_symbols={f"{candidates[0]}USDT", f"{candidates[2]}USDT"},
+        )
+        self.assertEqual(result["symbols"], [f"{candidates[0]}USDT", f"{candidates[2]}USDT"])
+        self.assertEqual(result["trade_symbols"], [f"{candidates[0]}USDT", f"{candidates[2]}USDT"])
+        self.assertEqual(result["trade_eligible_count"], 2)
+
+    def test_fails_closed_if_not_enough_binance_spot_analysis_pairs(self):
+        candidates = [row["symbol"] for row in STATIC_TOP_100]
+        contracts = [make_contract(f"{s}USDT") for s in candidates[:3]]
+        with self.assertRaisesRegex(UniverseError, "only 2/3 analysis symbols"):
+            build_top_coin_universe(
+                FakeBitget(contracts), top_n=3,
+                binance_spot_symbols={f"{s}USDT" for s in candidates[:2]},
+            )
+
+    def test_stablecoins_are_not_in_the_static_candidate_list(self):
+        symbols = {row["symbol"] for row in STATIC_TOP_100}
+        self.assertTrue(symbols.isdisjoint(STABLECOIN_SYMBOLS))
+
+    def test_rejects_invalid_source_and_size(self):
+        client = FakeBitget([make_contract("BTCUSDT")])
+        with self.assertRaisesRegex(UniverseError, "SIGNAL_DATA_SOURCE"):
+            build_top_coin_universe(client, signal_data_source="unknown", top_n=1,
+                                    binance_spot_symbols={"BTCUSDT"})
+        with self.assertRaisesRegex(UniverseError, "between 1 and 100"):
+            build_top_coin_universe(client, top_n=101, binance_spot_symbols={"BTCUSDT"})
+
+
+class BitgetFuturesUniverseTests(unittest.TestCase):
+    def test_bitget_linear_selects_top_n_real_usdt_perpetuals_by_quote_volume(self):
+        contracts = [make_contract(f"COIN{i:03d}USDT") for i in range(105)]
+        tickers = [
+            {"symbol": f"COIN{i:03d}USDT", "quoteVolume": str((i + 1) * 1000), "lastPr": "1"}
+            for i in range(105)
+        ]
+        client = FakeBitget(contracts, tickers)
+        result = build_top_coin_universe(client, signal_data_source="bitget_linear", top_n=100)
+
+        self.assertEqual(result["requested_count"], 100)
+        self.assertEqual(result["selected_count"], 100)
+        self.assertEqual(result["trade_eligible_count"], 100)
+        self.assertEqual(len(result["trade_symbols"]), 100)
+        self.assertEqual(result["trade_symbols"][0], "COIN104USDT")
+        self.assertEqual(result["trade_symbols"][-1], "COIN005USDT")
+        self.assertTrue(all(row["trade_eligible"] for row in result["coins"]))
+        self.assertEqual(result["ranking_metric"], "24h quote volume (USDT)")
+        self.assertFalse(result["ranking_is_static"])
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(client.ticker_calls, 1)
+
+    def test_bitget_linear_requires_full_requested_universe(self):
+        contracts = [make_contract(f"COIN{i:03d}USDT") for i in range(99)]
+        tickers = [{"symbol": f"COIN{i:03d}USDT", "quoteVolume": "1000"} for i in range(99)]
+        with self.assertRaisesRegex(UniverseError, "only 99 active"):
+            build_top_coin_universe(
+                FakeBitget(contracts, tickers),
+                signal_data_source="bitget_linear",
+                top_n=100,
+            )
+
+    def test_bitget_linear_excludes_stablecoin_bases_and_nonpositive_volume(self):
+        contracts = [make_contract("BTCUSDT"), make_contract("USDCUSDT"), make_contract("ETHUSDT")]
+        tickers = [
+            {"symbol": "BTCUSDT", "quoteVolume": "1000"},
+            {"symbol": "USDCUSDT", "quoteVolume": "999999"},
+            {"symbol": "ETHUSDT", "quoteVolume": "0"},
+        ]
+        with self.assertRaisesRegex(UniverseError, "only 1 active"):
+            build_top_coin_universe(
+                FakeBitget(contracts, tickers),
+                signal_data_source="bitget_linear",
+                top_n=2,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
+"""
+
+def patch_bitget_demo(source: str) -> str:
+    start = source.find("    def get_usdt_perpetual_contracts(")
+    end = source.find("    @staticmethod\n    def _granularity", start)
+    if start < 0 or end < 0:
+        raise RuntimeError("Bitget market-method patch anchor not found.")
+    updated = source[:start] + BITGET_MARKET_METHODS + source[end:]
+    compile(updated, "bitget_demo.py", "exec")
+    return updated
+
+def patch_universe(source: str) -> str:
+    source = source.replace(
+        '"""Static ranked candidate universe; no third-party ranking API is used."""',
+        '"""Static Binance-spot or live Bitget USDT-perpetual ranked candidate universe."""',
+    )
+    start = source.find("def build_top_coin_universe(")
+    if start < 0:
+        raise RuntimeError("Universe function patch anchor not found.")
+    updated = source[:start] + BITGET_UNIVERSE_FUNCTION
+    compile(updated, "universe.py", "exec")
+    return updated
+
+def patch_runner(source: str) -> str:
+    old_heading = 'f"📊 اسکن بازار بر اساس فهرست ثابت ۱۰۰ کوین انجام شد.\\n"'
+    new_heading = '(f"📊 اسکن ۱۰۰ قرارداد فعال Bitget USDT-Futures بر اساس حجم ۲۴ساعته انجام شد.\\n" if signal_data_source == "bitget_linear" else f"📊 اسکن بازار بر اساس فهرست ثابت ۱۰۰ کوین انجام شد.\\n")'
+    if old_heading in source:
+        source = source.replace(old_heading, new_heading, 1)
+    elif new_heading not in source:
+        raise RuntimeError("Runner Telegram heading patch anchor not found.")
+    old_meta = '"trade_eligible_count": universe.get("trade_eligible_count", 0),'
+    new_meta = old_meta + '\n                        "ranking_metric": universe.get("ranking_metric"),'
+    if old_meta in source:
+        source = source.replace(old_meta, new_meta, 1)
+    elif new_meta not in source:
+        raise RuntimeError("Runner scan-metadata patch anchor not found.")
+    compile(source, "runner.py", "exec")
+    return source
+
 def safe_runtime_path(root: Path, archive_name: str) -> Path:
     rel = PurePosixPath(archive_name)
     if rel.is_absolute() or ".." in rel.parts or not rel.parts:
@@ -125,10 +470,20 @@ def main() -> int:
         names = source_zip.namelist()
         config_candidates = [n for n in names if PurePosixPath(n).name == "PORTFOLIO_RISK_SETTINGS.py"]
         test_candidates = [n for n in names if n.endswith("tests/test_portfolio_risk.py")]
-        if len(config_candidates) != 1 or len(test_candidates) != 1:
-            raise RuntimeError("Required portfolio settings/test files were not found uniquely in the payload.")
+        universe_candidates = [n for n in names if PurePosixPath(n).name == "universe.py"]
+        bitget_candidates = [n for n in names if PurePosixPath(n).name == "bitget_demo.py"]
+        runner_candidates = [n for n in names if PurePosixPath(n).name == "runner.py"]
+        universe_test_candidates = [n for n in names if n.endswith("tests/test_universe.py")]
+        if (len(config_candidates) != 1 or len(test_candidates) != 1
+                or len(universe_candidates) != 1 or len(bitget_candidates) != 1
+                or len(runner_candidates) != 1 or len(universe_test_candidates) != 1):
+            raise RuntimeError("Required runtime source/test files were not found uniquely in the payload.")
         config_name = config_candidates[0]
         tests_name = test_candidates[0]
+        universe_name = universe_candidates[0]
+        bitget_name = bitget_candidates[0]
+        runner_name = runner_candidates[0]
+        universe_test_name = universe_test_candidates[0]
 
         with zipfile.ZipFile(rebuilt_zip, "w") as target_zip:
             for info in source_zip.infolist():
@@ -186,6 +541,19 @@ def main() -> int:
                     patched_tests = text.encode("utf-8")
                     data = patched_tests
 
+                elif info.filename == universe_name:
+                    data = patch_universe(data.decode("utf-8")).encode("utf-8")
+
+                elif info.filename == bitget_name:
+                    data = patch_bitget_demo(data.decode("utf-8")).encode("utf-8")
+
+                elif info.filename == runner_name:
+                    data = patch_runner(data.decode("utf-8")).encode("utf-8")
+
+                elif info.filename == universe_test_name:
+                    compile(UNIVERSE_TESTS, "tests/test_universe.py", "exec")
+                    data = UNIVERSE_TESTS.encode("utf-8")
+
                 target_zip.writestr(info, data)
 
     if patched_config is None or patched_tests is None:
@@ -240,10 +608,11 @@ def main() -> int:
     checksum_path.write_text(f"{digest}  bot_payload.bin\n", encoding="utf-8")
 
     print("[PASS] Encrypted runtime rebuilt and round-trip verified.")
+    print("[PASS] Top-100 universe now selects active Bitget USDT-M perpetuals by 24h quote volume when SIGNAL_DATA_SOURCE=bitget_linear.")
     print("[PASS] Portfolio limits: 7 concurrent positions; 4 new entries per analysis run.")
     print("[INFO] Portfolio risk ceiling derived from existing 6.5% per-position setting: 45.5% equity.")
     print("[INFO] Aggregate notional ceiling remains 9.0x equity (shared average 1.2857x per slot).")
-    print("[PASS] Updated offline test expectations included; runtime extracted only to temporary runner storage.")
+    print("[PASS] Updated offline tests included; runtime extracted only to temporary runner storage.")
     return 0
 
 
