@@ -619,6 +619,10 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except SyntaxError as exc:
+        # Report only syntax location/message; never print source snippets from the decrypted payload.
+        print(f"[FAIL] Runtime source syntax validation failed: line={exc.lineno}, column={exc.offset}, message={exc.msg}.")
+        raise SystemExit(1)
     except Exception as exc:
         # Deliberately omit exception contents to avoid exposing any decrypted data.
         print(f"[FAIL] Encrypted runtime rebuild aborted ({type(exc).__name__}).")
