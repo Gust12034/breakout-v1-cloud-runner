@@ -152,14 +152,27 @@ jobs:
               error_type, message = found[-1]
               lower = message.lower()
               if "controlplaneerror" in error_type.lower():
-                  if "unauthorized" in lower:
+                  if "google apps script application error" in lower:
+                      if "unexpected headers in sheet events" in lower:
+                          reason = "Apps Script final report rejected: the Events sheet headers do not match the required schema."
+                      elif "unexpected headers in sheet positions" in lower:
+                          reason = "Apps Script final report rejected: the Positions sheet headers do not match the required schema."
+                      elif "cell-size limit" in lower or "50000" in lower or "50,000" in lower:
+                          reason = "Apps Script final report rejected an oversized Google Sheets cell; event payloads are now compacted."
+                      elif "lock" in lower or "timed out" in lower:
+                          reason = "Apps Script could not acquire its report lock; an overlapping execution may be holding it."
+                      elif "spreadsheet" in lower:
+                          reason = "Apps Script could not write final state/events to the configured spreadsheet; inspect Apps Script Executions."
+                      else:
+                          reason = "Apps Script rejected the final report during state/event persistence; inspect Apps Script Executions."
+                  elif "unauthorized" in lower:
                       reason = "Google Apps Script rejected CONTROL_PLANE_TOKEN; compare the GitHub Actions secret with the Script Property."
                   elif "google_apps_script_url" in lower or "control_plane_token" in lower:
                       reason = "The Google Apps Script URL or CONTROL_PLANE_TOKEN is missing or invalid."
                   elif "spreadsheet" in lower or "spreadsheet_id" in lower:
                       reason = "The Apps Script control plane could not access the configured spreadsheet; inspect SPREADSHEET_ID and Apps Script Executions."
-                  elif "invalid response" in lower or "json" in lower:
-                      reason = "Apps Script returned an invalid/non-JSON response; verify the deployed /exec URL and its access settings."
+                  elif "non-json" in lower or "json" in lower or "invalid response" in lower:
+                      reason = "Apps Script returned a non-JSON response; verify the deployed /exec URL and its access settings."
                   else:
                       reason = "Google Apps Script control-plane request failed; detailed response withheld."
               elif "bitgetapierror" in error_type.lower():
