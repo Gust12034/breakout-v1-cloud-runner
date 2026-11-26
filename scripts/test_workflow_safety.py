@@ -27,5 +27,7 @@ require(r"scripts/sanitize_runner_log\.py", BOT, "Bot workflow publishes only sa
 require(r"scripts/sanitize_runner_log\.py", MONITOR, "Position Monitor publishes only sanitized runtime diagnostics")
 require(r"scripts/test_log_sanitizer\.py", BOT, "Bot workflow runs secret-redaction regression tests")
 require(r"scripts/test_log_sanitizer\.py", MONITOR, "Position Monitor runs secret-redaction regression tests")
+require(r"uses:\s*actions/upload-artifact@v7\.0\.2", BOT, "Bot workflow uses the Node 24 compatible upload-artifact release")
+require(r"uses:\s*actions/upload-artifact@v7\.0\.2", MONITOR, "Position Monitor uses the Node 24 compatible upload-artifact release")
 
 print("PASS: workflow safety and reporting assertions completed.")
