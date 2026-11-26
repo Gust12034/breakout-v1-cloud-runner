@@ -25,5 +25,7 @@ require(r"scripts/verify_report\.py", BOT, "Bot workflow verifies the persisted 
 require(r"scripts/verify_report\.py", MONITOR, "Position Monitor verifies the persisted final report")
 require(r"scripts/sanitize_runner_log\.py", BOT, "Bot workflow publishes only sanitized runtime diagnostics")
 require(r"scripts/sanitize_runner_log\.py", MONITOR, "Position Monitor publishes only sanitized runtime diagnostics")
+require(r"scripts/test_log_sanitizer\.py", BOT, "Bot workflow runs secret-redaction regression tests")
+require(r"scripts/test_log_sanitizer\.py", MONITOR, "Position Monitor runs secret-redaction regression tests")
 
 print("PASS: workflow safety and reporting assertions completed.")
