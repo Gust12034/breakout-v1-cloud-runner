@@ -426,7 +426,10 @@ function buildReportNotification_(events) {
     const message = String(evt.message || evt.kind || 'event').trim().slice(0, 520);
     lines.push('\n' + message);
   });
-  if (!runEnd) lines.push('\n⚠️ رویداد run_end در این گزارش وجود ندارد؛ وضعیت نهایی اجرا تأیید نشده است.');
+  const hasRunStart = indexed.some(item => String(item.evt.kind || '') === 'run_start');
+  if (!runEnd && !hasRunStart) {
+    lines.push('\n⚠️ رویداد run_end در این گزارش وجود ندارد؛ وضعیت نهایی اجرا تأیید نشده است.');
+  }
   if (indexed.length > chosen.length) {
     lines.push('\n… ' + (indexed.length - chosen.length) + ' رویداد مهم دیگر در تب Events ذخیره شد.');
   }
