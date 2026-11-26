@@ -177,6 +177,7 @@ const notification = context.buildReportNotification_([
 ]);
 assert.ok(notification.includes('\nSTART'), 'startup notification should contain a real newline');
 assert.ok(!notification.includes('\\nSTART'), 'startup notification must not contain literal backslash-n');
+assert.ok(!notification.includes('وضعیت نهایی اجرا تأیید نشده'), 'startup notification must not falsely claim that the run failed to finish');
 
 const events = [];
 for (let i = 0; i < 125; i += 1) {
