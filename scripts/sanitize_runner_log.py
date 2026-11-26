@@ -7,13 +7,16 @@ import re
 from pathlib import Path
 
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+APPS_SCRIPT_URL_RE = re.compile(
+    r"(?i)https?://script\.google\.com/macros/s/[^/\s]+/exec(?:\?[^\s]*)?"
+)
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"""(?i)(["']?\b(?:BITGET_DEMO_API_KEY|BITGET_DEMO_API_SECRET|BITGET_DEMO_API_PASSPHRASE|BOT_BUNDLE_PASSPHRASE|GOOGLE_APPS_SCRIPT_URL|CONTROL_PLANE_TOKEN|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|B1D_GITHUB_TOKEN|ACCESS-KEY|ACCESS-SIGN|ACCESS-PASSPHRASE|API[_-]?KEY|API[_-]?SECRET|CLIENT[_-]?SECRET|AUTHORIZATION|PASSWORD|PASSPHRASE|ACCESS[_-]?TOKEN)\b["']?\s*[:=]\s*)"""
+    r"""(?i)(["']?\b(?:BITGET_DEMO_API_KEY|BITGET_DEMO_API_SECRET|BITGET_DEMO_API_PASSPHRASE|BOT_BUNDLE_PASSPHRASE|GOOGLE_APPS_SCRIPT_URL|CONTROL_PLANE_TOKEN|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|B1D_GITHUB_TOKEN|ACCESS-KEY|ACCESS-SIGN|ACCESS-PASSPHRASE|API[_-]?KEY|API[_-]?SECRET|CLIENT[_-]?(?:KEY|SECRET)|PRIVATE[_-]?KEY|SECRET|SIGNATURE|AUTHORIZATION|PASSWORD|PASSPHRASE|ACCESS[_-]?TOKEN)\b["']?\s*[:=]\s*)"""
     r"""(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)"""
 )
 TELEGRAM_URL_RE = re.compile(r"(?i)(https?://api\.telegram\.org/bot)[^/\s]+")
 QUERY_SECRET_RE = re.compile(
-    r"(?i)([?&](?:sign|signature|api[_-]?key|api[_-]?secret|passphrase|token|key|secret)=)[^&#\s]+"
+    r"(?i)([?&](?:sign|signature|api[_-]?key|api[_-]?secret|access[_-]?key|access[_-]?secret|client[_-]?key|private[_-]?key|user_content_key|user_content_signature|webhook_secret|hook|passphrase|token|key|secret)=)[^&#\s]+"
 )
 BEARER_RE = re.compile(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]+")
 LONG_CREDENTIAL_RE = re.compile(
@@ -23,6 +26,7 @@ LONG_CREDENTIAL_RE = re.compile(
 def sanitize_line(line: str) -> str:
     value = ANSI_RE.sub("", line).replace("\x00", "")
     value = TELEGRAM_URL_RE.sub(r"\1[REDACTED]", value)
+    value = APPS_SCRIPT_URL_RE.sub("https://script.google.com/macros/s/[REDACTED]/exec", value)
     value = QUERY_SECRET_RE.sub(r"\1[REDACTED]", value)
     value = BEARER_RE.sub(r"\1[REDACTED]", value)
     value = SECRET_ASSIGNMENT_RE.sub(r"\1[REDACTED]", value)
