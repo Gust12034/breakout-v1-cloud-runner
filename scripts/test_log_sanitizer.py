@@ -54,6 +54,27 @@ class SanitizerTests(unittest.TestCase):
         self.assertNotIn("query-signature-secret", safe)
         self.assertNotIn("bearer-token-secret", safe)
 
+    def test_private_key_and_webhook_query_fields(self):
+        self.assert_secret_removed(
+            '{"private_key": "private-key-value"}',
+            "private-key-value"
+        )
+        self.assert_secret_removed(
+            "https://example.invalid/callback?hook=webhook-secret",
+            "webhook-secret"
+        )
+        self.assert_secret_removed(
+            "https://example.invalid/callback?access_key=access-key-value",
+            "access-key-value"
+        )
+
+    def test_bare_apps_script_deployment_url(self):
+        safe = sanitize_line(
+            "Redirected to https://script.google.com/macros/s/deployment-id-secret/exec"
+        )
+        self.assertNotIn("deployment-id-secret", safe)
+        self.assertIn("[REDACTED]", safe)
+
     def test_ansi_and_long_lines_are_bounded(self):
         safe = sanitize_line("\x1b[31m" + ("x" * 2000) + "\x1b[0m")
         self.assertNotIn("\x1b", safe)
