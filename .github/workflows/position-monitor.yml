@@ -55,7 +55,8 @@ jobs:
         run: |
           node --check < google-apps-script/Code.gs
           node scripts/test_apps_script.js
-          python -m py_compile scripts/sanitize_runner_log.py scripts/verify_report.py scripts/test_workflow_safety.py
+          python -m py_compile scripts/sanitize_runner_log.py scripts/verify_report.py scripts/test_workflow_safety.py scripts/test_log_sanitizer.py
+          python scripts/test_log_sanitizer.py
           python scripts/test_workflow_safety.py
       - name: Install decryptor dependency
         run: python -m pip install --disable-pip-version-check 'cryptography>=42,<50'
