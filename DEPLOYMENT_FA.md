@@ -98,6 +98,29 @@
 4. فقط پس از موفقیت کامل تست‌های Read-only، تطبیق داده‌ها و کنترل پوزیشن‌ها، در صورت تصمیم آگاهانه `TRADING_ENABLED=true` را برای **Demo** فعال کن. `LIVE_TRADING=false` در Workflow قفل شده و موتور Mainnet را رد می‌کند.
 5. زمان‌بند Apps Script را نصب کن. اجرای تحلیل هر ۴ ساعت و پایش موقعیت‌ها در فاصله‌های ۵ دقیقه‌ای هدف‌گذاری شده‌اند.
 
+## ۶-الف) اعتبارسنجی گزارش، لاگ و ایمنی
+
+نسخهٔ فعلی Cloud Runner پس از هر اجرای Bot یا Position Monitor چند کنترل اضافه انجام می‌دهد:
+
+1. پیش از اجرای runtime، Syntax فایل \`google-apps-script/Code.gs\` و تست‌های گزارش‌دهی Apps Script بررسی می‌شوند.
+2. خروجی runtime در فضای موقت Runner ثبت می‌شود. فقط نسخهٔ پاک‌سازی‌شده در لاگ عمومی نمایش داده و به‌صورت Artifact با نگهداری ۱۴روزه ذخیره می‌شود؛ فایل خام runtime در مخزن یا Artifact عمومی قرار نمی‌گیرد.
+3. پس از پایان برنامه، \`scripts/verify_report.py\` وضعیت ذخیره‌شده را دوباره از Apps Script می‌خواند و \`run_status\`، \`run_mode\`، تعداد رویدادهای دریافت/ذخیره، وجود \`run_end\`، وضعیت ارسال Telegram، تعداد تحلیل بازار و قفل‌های ورود را کنترل می‌کند.
+4. Workflow جداگانهٔ **Cloud Runner Reporting Validation** به تغییر فایل‌های Apps Script، تست‌ها، اسکریپت‌ها و Workflowها واکنش نشان می‌دهد. این Workflow فقط تست آفلاین و استاتیک انجام می‌دهد و به API صرافی متصل نمی‌شود.
+5. Workflow پایش پوزیشن از \`SIGNAL_DATA_SOURCE=bitget_linear\` استفاده می‌کند تا دادهٔ کندل مدیریت پوزیشن از همان بازار Futures مربوط به Bitget خوانده شود؛ اسکن Universe و ورود جدید در مسیر Monitor خاموش است.
+
+### به‌روزرسانی ضروری Apps Script بعد از انتشار Code.gs جدید
+
+تغییر فایل GitHub پروژهٔ مستقرشدهٔ Google Apps Script را خودکار تغییر نمی‌دهد. برای فعال‌شدن batch persistence، گزارش \`report_delivery\` و اعلان‌های اصلاح‌شده:
+
+1. پروژهٔ Apps Script متصل به Google Sheet را باز کن.
+2. فایل \`Code.gs\` را با نسخهٔ همین مخزن در مسیر \`google-apps-script/Code.gs\` به‌طور کامل جایگزین کن و Save بزن.
+3. \`Deploy → Manage deployments\` را باز کن، Web App فعلی را Edit کن، \`New version\` را انتخاب و Deploy کن.
+4. URL فعلی \`/exec\` را حفظ کن؛ Secretها و Script Properties را پاک یا بازسازی نکن.
+
+بعد از Deploy، اجرای Bot یا Monitor باید در snapshot فیلد \`report_delivery\` داشته باشد. وجود این فیلد و تأیید ذخیرهٔ همهٔ رویدادها و ارسال Telegram توسط مرحلهٔ نهایی Workflow کنترل می‌شود. اگر فیلد وجود نداشته باشد، معمولاً نسخهٔ قدیمی Web App هنوز مستقر است یا ذخیرهٔ metadata کامل نشده؛ جزئیات اجرای Apps Script را بررسی کن.
+
+**مهم:** تا زمان تأیید نهایی، مقادیر ثابت \`TRADING_ENABLED=false\` و \`LIVE_TRADING=false\` را تغییر نده. بررسی گزارش به معنی فعال‌سازی سفارش‌گذاری نیست.
+
 ## ۷) جلوگیری از اجرای دوگانه
 
 در مخزن خصوصی قدیمی `Breakout-V1-Dynamic`، Workflowهای زمان‌بندی‌شدهٔ قدیمی Bot و Position Monitor را در تب Actions غیرفعال کن تا دو موتور هم‌زمان اجرا نشوند. مخزن قدیمی را خصوصی نگه دار.
