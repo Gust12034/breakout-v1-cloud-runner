@@ -8,12 +8,12 @@ from pathlib import Path
 
 ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)(\b(?:BITGET_DEMO_API_KEY|BITGET_DEMO_API_SECRET|BITGET_DEMO_API_PASSPHRASE|"
+    r"""(?i)(["']?\b(?:BITGET_DEMO_API_KEY|BITGET_DEMO_API_SECRET|BITGET_DEMO_API_PASSPHRASE|"
     r"BOT_BUNDLE_PASSPHRASE|GOOGLE_APPS_SCRIPT_URL|CONTROL_PLANE_TOKEN|"
     r"TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|B1D_GITHUB_TOKEN|"
     r"ACCESS-KEY|ACCESS-SIGN|ACCESS-PASSPHRASE|API[_-]?KEY|API[_-]?SECRET|"
-    r"CLIENT[_-]?SECRET|AUTHORIZATION|PASSWORD|PASSPHRASE|ACCESS[_-]?TOKEN)\b\s*[:=]\s*)"
-    r"(?:\"[^\"]*\"|'[^']*'|[^\s,;&]+)"
+    r"CLIENT[_-]?SECRET|AUTHORIZATION|PASSWORD|PASSPHRASE|ACCESS[_-]?TOKEN)\b["']?\s*[:=]\s*)"
+    r"""(?:"[^"]*"|'[^']*'|[^\s,;&}\]]+)"""
 )
 TELEGRAM_URL_RE = re.compile(r"(?i)(https?://api\.telegram\.org/bot)[^/\s]+")
 QUERY_SECRET_RE = re.compile(
