@@ -39,3 +39,14 @@ jobs:
 
       - name: Verify order-entry locks and data-source consistency
         run: python scripts/test_workflow_safety.py
+
+      - name: Prepare artifact upload smoke-test file
+        run: |
+          printf '%s\n' 'Cloud Runner artifact upload smoke test.' > "$RUNNER_TEMP/artifact-smoke-test.txt"
+
+      - name: Test Node 24 artifact upload action
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: cloud-runner-artifact-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/artifact-smoke-test.txt
+          retention-days: 1
