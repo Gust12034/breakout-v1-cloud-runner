@@ -68,6 +68,7 @@ jobs:
             exit 1
           fi
       - name: Decrypt runtime into ephemeral runner storage
+        id: decrypt_runtime
         env:
           BOT_BUNDLE_PASSPHRASE: ${{ secrets.BOT_BUNDLE_PASSPHRASE }}
         run: python scripts/decrypt_bundle.py --input private_bundle/bot_payload.bin --output "$RUNNER_TEMP/breakout_runtime"
@@ -155,7 +156,7 @@ jobs:
           retention-days: 14
 
       - name: Verify persisted report and safety state
-        if: always()
+        if: always() && steps.decrypt_runtime.outcome == 'success'
         env:
           RUNNER_EXIT_CODE: ${{ steps.run_monitor.outputs.runner_exit_code || '999' }}
         run: |
