@@ -148,7 +148,7 @@ jobs:
 
       - name: Upload sanitized runtime diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: breakout-position-monitor-sanitized-log-${{ github.run_id }}
           path: ${{ runner.temp }}/breakout_monitor.sanitized.log
