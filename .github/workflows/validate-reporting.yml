@@ -1,0 +1,39 @@
+name: Cloud Runner Reporting Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "google-apps-script/**"
+      - "scripts/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-reporting:
+    name: Validate Apps Script reporting and safety guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout cloud runner
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Validate Apps Script JavaScript syntax
+        run: node --check < google-apps-script/Code.gs
+
+      - name: Run Apps Script reporting regression tests
+        run: node scripts/test_apps_script.js
+
+      - name: Compile Python diagnostics and report verifier
+        run: python -m py_compile scripts/sanitize_runner_log.py scripts/verify_report.py scripts/test_workflow_safety.py
+
+      - name: Verify order-entry locks and data-source consistency
+        run: python scripts/test_workflow_safety.py
