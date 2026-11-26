@@ -94,6 +94,7 @@ function makeContext() {
     ['TELEGRAM_CHAT_ID', '123456']
   ]);
   const telegramRequests = [];
+  let telegramShouldFail = false;
   let uuid = 0;
   const context = {
     console: {
@@ -142,8 +143,12 @@ function makeContext() {
       fetch(url, options) {
         telegramRequests.push({ url, options });
         return {
-          getResponseCode() { return 200; },
-          getContentText() { return '{"ok":true,"result":{"message_id":1}}'; }
+          getResponseCode() { return telegramShouldFail ? 500 : 200; },
+          getContentText() {
+            return telegramShouldFail
+              ? '{"ok":false,"description":"simulated delivery failure"}'
+              : '{"ok":true,"result":{"message_id":1}}';
+          }
         };
       }
     },
@@ -163,12 +168,18 @@ function makeContext() {
     Set
   };
   vm.createContext(context);
-  return { context, spreadsheet, telegramRequests, properties };
+  return {
+    context,
+    spreadsheet,
+    telegramRequests,
+    properties,
+    setTelegramFailure(value) { telegramShouldFail = Boolean(value); }
+  };
 }
 
 const sourcePath = path.join(__dirname, '..', 'google-apps-script', 'Code.gs');
 const source = fs.readFileSync(sourcePath, 'utf8');
-const { context, spreadsheet, telegramRequests } = makeContext();
+const { context, spreadsheet, telegramRequests, setTelegramFailure } = makeContext();
 vm.runInContext(source, context, { filename: 'Code.gs' });
 
 const notification = context.buildReportNotification_([
@@ -259,6 +270,31 @@ const storedState = context.getBotState_();
 assert.equal(storedState.snapshot.report_delivery.events_saved, events.length);
 assert.equal(storedState.snapshot.report_delivery.notification_status, 'sent');
 
+// Existing-position updates should read the Positions tab once for headers and once
+// for the affected rows, not rescan the full sheet for every event.
+const positionReadCallsBefore = positionsSheet.readCalls;
+const positionWriteCallsBefore = positionsSheet.writeCalls;
+setTelegramFailure(true);
+const updateResponse = context.handleReport_({
+  events: [
+    {
+      kind: 'position_update',
+      message: 'position stop updated again',
+      payload: { position_id: 'position-test-1', current_stop: 50700, target: 52000 }
+    },
+    { kind: 'run_end', message: 'RUN FINISHED SUCCESSFULLY', payload: { status: 'success' } }
+  ],
+  strategy_state: { symbols: {} },
+  snapshot: reportSnapshot
+});
+const updateData = JSON.parse(updateResponse.content);
+assert.equal(positionsSheet.readCalls - positionReadCallsBefore, 2, 'batch position update should perform bounded reads');
+assert.equal(positionsSheet.writeCalls - positionWriteCallsBefore, 1, 'existing position changes should be written in one batch');
+assert.equal(Number(positionsSheet.rows[1][7]), 50700, 'the existing position stop should update');
+assert.equal(updateData.notification_status, 'failed', 'Telegram API failure must be surfaced in report telemetry');
+assert.equal(updateData.notification_errors, 1);
+assert.equal(context.getBotState_().snapshot.report_delivery.notification_status, 'failed');
+
 const beforeOverflow = eventsSheet.getLastRow();
 assert.throws(
   () => context.handleReport_({
@@ -283,6 +319,8 @@ console.log('PASS: real newline formatting and startup notifications');
 console.log('PASS: complete event persistence beyond 100 items and run_end retention');
 console.log('PASS: event-cell compaction below the safe Sheets cell limit');
 console.log('PASS: batched position lifecycle update (open -> update -> closed)');
+console.log('PASS: existing position updates use bounded sheet reads and one write');
+console.log('PASS: Telegram delivery failure is recorded for the final workflow verifier');
 console.log('PASS: report-delivery telemetry is stored in BotState snapshot');
 console.log('PASS: oversized event batches fail closed without partial append');
 console.log('PASS: oversized state values preserve the previous good value');
