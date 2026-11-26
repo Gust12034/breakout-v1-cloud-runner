@@ -23,9 +23,9 @@ LONG_CREDENTIAL_RE = re.compile(
 def sanitize_line(line: str) -> str:
     value = ANSI_RE.sub("", line).replace("\x00", "")
     value = TELEGRAM_URL_RE.sub(r"\1[REDACTED]", value)
-    value = SECRET_ASSIGNMENT_RE.sub(r"\1[REDACTED]", value)
     value = QUERY_SECRET_RE.sub(r"\1[REDACTED]", value)
     value = BEARER_RE.sub(r"\1[REDACTED]", value)
+    value = SECRET_ASSIGNMENT_RE.sub(r"\1[REDACTED]", value)
     value = LONG_CREDENTIAL_RE.sub("[REDACTED_CREDENTIAL]", value)
     return value[:1200]
 
