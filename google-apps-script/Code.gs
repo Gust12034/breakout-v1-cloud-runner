@@ -156,9 +156,15 @@ function setStateValue_(key, value) {
   const sheet = getSheet_('BotState', STATE_HEADERS);
   const text = String(value);
   const chunkPrefix = key + '__chunk_';
+  // Validate capacity before deleting the previous good value.
+  const chunkSize = 35000;
+  const count = Math.ceil(text.length / chunkSize);
+  if (count > 100) {
+    throw new Error('BotState value exceeds the supported 100-chunk limit for key: ' + key);
+  }
   const last = sheet.getLastRow();
   const rows = last > 1 ? sheet.getRange(2, 1, last - 1, 3).getValues() : [];
-  // Remove the previous value and any old chunks before writing the new version.
+  // Remove the previous value and any old chunks only after validation succeeds.
   for (let i = rows.length - 1; i >= 0; i--) {
     const storedKey = String(rows[i][0] || '');
     if (storedKey === key || storedKey.indexOf(chunkPrefix) === 0) {
@@ -167,14 +173,9 @@ function setStateValue_(key, value) {
   }
   const now = new Date().toISOString();
   // Google Sheets cells have a 50,000-character limit. Keep a margin below it.
-  const chunkSize = 35000;
   if (text.length <= chunkSize) {
     sheet.appendRow([key, text, now]);
     return;
-  }
-  const count = Math.ceil(text.length / chunkSize);
-  if (count > 100) {
-    throw new Error('BotState value exceeds the supported 100-chunk limit for key: ' + key);
   }
   const rowsToWrite = [[key, '__CHUNKED__:' + count, now]];
   for (let i = 0; i < count; i++) {
