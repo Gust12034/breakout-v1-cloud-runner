@@ -33,7 +33,8 @@ jobs:
         run: node scripts/test_apps_script.js
 
       - name: Compile Python diagnostics and report verifier
-        run: python -m py_compile scripts/sanitize_runner_log.py scripts/verify_report.py scripts/test_workflow_safety.py
+        run: python -m py_compile scripts/sanitize_runner_log.py scripts/verify_report.py scripts/test_workflow_safety.py scripts/test_log_sanitizer.py
+          python scripts/test_log_sanitizer.py
 
       - name: Verify order-entry locks and data-source consistency
         run: python scripts/test_workflow_safety.py
