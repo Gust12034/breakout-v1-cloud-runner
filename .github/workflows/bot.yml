@@ -53,6 +53,12 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - name: Validate Apps Script reporting code and workflow safety
+        run: |
+          node --check < google-apps-script/Code.gs
+          node scripts/test_apps_script.js
+          python -m py_compile scripts/sanitize_runner_log.py scripts/verify_report.py scripts/test_workflow_safety.py
+          python scripts/test_workflow_safety.py
       - name: Install decryptor dependency
         run: python -m pip install --disable-pip-version-check 'cryptography>=42,<50'
       - name: Verify encrypted runtime integrity
@@ -131,63 +137,42 @@ jobs:
               sys.exit(1)
           PY
       - name: Run strategy in Bitget Classic Demo only
+        id: run_strategy
         shell: bash
         run: |
           set +e
           python "$RUNNER_TEMP/breakout_runtime/runner.py" > "$RUNNER_TEMP/breakout_runner.log" 2>&1
           rc=$?
-          if [ "$rc" -ne 0 ]; then
-            echo "::group::Sanitized runtime diagnostic"
-            python - "$RUNNER_TEMP/breakout_runner.log" <<'PY'
-          import re
-          import sys
-          from pathlib import Path
+          echo "runner_exit_code=$rc" >> "$GITHUB_OUTPUT"
+          echo "Runner process exited with code $rc; sanitized diagnostics will be published below."
 
-          raw = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
-          found = re.findall(r"(?m)^([A-Za-z_][\w.]*(?:Error|Exception)):\s*(.*)$", raw)
-          if not found:
-              print("[DIAGNOSTIC] No final Python exception line was captured.")
-              print("[DIAGNOSTIC] Check the private Events sheet for a position-level error.")
-          else:
-              error_type, message = found[-1]
-              lower = message.lower()
-              if "controlplaneerror" in error_type.lower():
-                  if "google apps script application error" in lower:
-                      if "unexpected headers in sheet events" in lower:
-                          reason = "Apps Script final report rejected: the Events sheet headers do not match the required schema."
-                      elif "unexpected headers in sheet positions" in lower:
-                          reason = "Apps Script final report rejected: the Positions sheet headers do not match the required schema."
-                      elif "cell-size limit" in lower or "50000" in lower or "50,000" in lower:
-                          reason = "Apps Script final report rejected an oversized Google Sheets cell; event payloads are now compacted."
-                      elif "lock" in lower or "timed out" in lower:
-                          reason = "Apps Script could not acquire its report lock; an overlapping execution may be holding it."
-                      elif "spreadsheet" in lower:
-                          reason = "Apps Script could not write final state/events to the configured spreadsheet; inspect Apps Script Executions."
-                      else:
-                          reason = "Apps Script rejected the final report during state/event persistence; inspect Apps Script Executions."
-                  elif "unauthorized" in lower:
-                      reason = "Google Apps Script rejected CONTROL_PLANE_TOKEN; compare the GitHub Actions secret with the Script Property."
-                  elif "google_apps_script_url" in lower or "control_plane_token" in lower:
-                      reason = "The Google Apps Script URL or CONTROL_PLANE_TOKEN is missing or invalid."
-                  elif "spreadsheet" in lower or "spreadsheet_id" in lower:
-                      reason = "The Apps Script control plane could not access the configured spreadsheet; inspect SPREADSHEET_ID and Apps Script Executions."
-                  elif "non-json" in lower or "json" in lower or "invalid response" in lower:
-                      reason = "Apps Script returned a non-JSON response; verify the deployed /exec URL and its access settings."
-                  else:
-                      reason = "Google Apps Script control-plane request failed; detailed response withheld."
-              elif "bitgetapierror" in error_type.lower():
-                  code = re.search(r"\bcode=(\d+)\b", message)
-                  reason = "Bitget API request failed" + ((" (code=" + code.group(1) + ")") if code else "") + "."
-              elif "timeout" in error_type.lower() or "timed out" in lower:
-                  reason = "A network/API request timed out."
-              elif "connection" in error_type.lower():
-                  reason = "A network connection to an external service failed."
-              else:
-                  reason = "Python raised " + error_type + "; exception details withheld from the public log."
-              print("[DIAGNOSTIC] " + reason)
-          PY
-            echo "::endgroup::"
-            echo "::error::Runner failed (exit $rc)."
-            exit "$rc"
+      - name: Publish sanitized runtime diagnostics
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/breakout_runner.log" ]; then
+            python scripts/sanitize_runner_log.py \
+              --input "$RUNNER_TEMP/breakout_runner.log" \
+              --output "$RUNNER_TEMP/breakout_runner.sanitized.log" \
+              --emit
+          else
+            printf '%s\n' '[LOG] Bot runner did not create a log file.' > "$RUNNER_TEMP/breakout_runner.sanitized.log"
+            cat "$RUNNER_TEMP/breakout_runner.sanitized.log"
           fi
-          echo "Runner completed. Detailed output remains in ephemeral runner storage."
+
+      - name: Upload sanitized runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: breakout-bot-sanitized-log-${{ github.run_id }}
+          path: ${{ runner.temp }}/breakout_runner.sanitized.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Verify persisted report and safety state
+        if: always()
+        env:
+          RUNNER_EXIT_CODE: ${{ steps.run_strategy.outputs.runner_exit_code || '999' }}
+        run: |
+          python scripts/verify_report.py \
+            --runtime-root "$RUNNER_TEMP/breakout_runtime" \
+            --expected-mode four_hour_analysis_and_execution
