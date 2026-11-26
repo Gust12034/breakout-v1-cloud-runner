@@ -4,6 +4,9 @@
  */
 const APP_NAME = 'Breakout V1 Dynamic';
 const QUIET_EVENT_KINDS = { position_snapshot: true, warmup: true };
+const MAX_REPORT_EVENTS = 2000;
+const REPORT_EVENT_BATCH_SIZE = 250;
+const MAX_CELL_JSON_CHARS = 40000;
 const STATE_HEADERS = ['key', 'value', 'updated_at'];
 const EVENT_HEADERS = ['id', 'created_at', 'kind', 'message', 'payload_json'];
 const POSITION_HEADERS = [
@@ -170,12 +173,17 @@ function setStateValue_(key, value) {
     return;
   }
   const count = Math.ceil(text.length / chunkSize);
-  sheet.appendRow([key, '__CHUNKED__:' + count, now]);
+  if (count > 100) {
+    throw new Error('BotState value exceeds the supported 100-chunk limit for key: ' + key);
+  }
+  const rowsToWrite = [[key, '__CHUNKED__:' + count, now]];
   for (let i = 0; i < count; i++) {
     const part = text.slice(i * chunkSize, (i + 1) * chunkSize);
     const suffix = ('000' + i).slice(-3);
-    sheet.appendRow([chunkPrefix + suffix, part, now]);
+    rowsToWrite.push([chunkPrefix + suffix, part, now]);
   }
+  const firstRow = sheet.getLastRow() + 1;
+  sheet.getRange(firstRow, 1, rowsToWrite.length, 3).setValues(rowsToWrite);
 }
 
 function ensureStateValueIfMissing_(key, defaultValue) {
@@ -224,58 +232,157 @@ function getBotState_() {
 }
 
 function handleReport_(body) {
+  const events = Array.isArray(body.events) ? body.events : [];
+  if (events.length > MAX_REPORT_EVENTS) {
+    throw new Error(
+      'Report contains ' + events.length + ' events; the supported maximum is ' + MAX_REPORT_EVENTS +
+      '. No report state was committed.'
+    );
+  }
+
+  const strategyState = body.strategy_state && typeof body.strategy_state === 'object' ? body.strategy_state : {};
+  const snapshot = body.snapshot && typeof body.snapshot === 'object' ? body.snapshot : {};
+  const reportSnapshot = JSON.parse(JSON.stringify(snapshot));
+  const now = new Date().toISOString();
+
+  // Prepare every row before writing anything. Never silently truncate events:
+  // critical alerts and the final run_end event must survive a noisy market scan.
+  const eventRows = events.map(evt => {
+    evt = evt && typeof evt === 'object' ? evt : {};
+    const kind = String(evt.kind || 'event').slice(0, 100);
+    const message = String(evt.message || kind).slice(0, 4000);
+    const payload = evt.payload && typeof evt.payload === 'object' ? evt.payload : {};
+    return [Utilities.getUuid(), now, kind, message, serializeJsonCell_(payload, MAX_CELL_JSON_CHARS)];
+  });
+
+  let positionsUpdated = 0;
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
-  let events;
   try {
-    events = Array.isArray(body.events) ? body.events.slice(0, 100) : [];
-    const strategyState = body.strategy_state && typeof body.strategy_state === 'object' ? body.strategy_state : {};
-    const snapshot = body.snapshot && typeof body.snapshot === 'object' ? body.snapshot : {};
+    // Persist all event rows in bounded batches. No event is dropped to fit
+    // an arbitrary 100-row limit; oversized payload cells are compacted safely.
+    if (eventRows.length) {
+      const eventsSheet = getSheet_('Events', EVENT_HEADERS);
+      const firstRow = eventsSheet.getLastRow() + 1;
+      for (let offset = 0; offset < eventRows.length; offset += REPORT_EVENT_BATCH_SIZE) {
+        const batch = eventRows.slice(offset, offset + REPORT_EVENT_BATCH_SIZE);
+        eventsSheet.getRange(firstRow + offset, 1, batch.length, EVENT_HEADERS.length).setValues(batch);
+      }
+      positionsUpdated = persistPositionEventsBatch_(events, now);
+    }
+
+    // Commit the final snapshot only after event/position persistence succeeds.
     setStateValue_('strategy_state_json', JSON.stringify(strategyState));
     setStateValue_('snapshot_json', JSON.stringify(snapshot));
-    setStateValue_('updated_at', new Date().toISOString());
-    // Batch event persistence: one Sheets write for the Events tab instead of
-    // one appendRow/openById round-trip per event.
-    if (events.length) {
-      const eventsSheet = getSheet_('Events', EVENT_HEADERS);
-      const now = new Date().toISOString();
-      const rows = events.map(evt => {
-        evt = evt || {};
-        const kind = String(evt.kind || 'event').slice(0, 100);
-        const message = String(evt.message || kind).slice(0, 4000);
-        const payload = evt.payload && typeof evt.payload === 'object' ? evt.payload : {};
-        return [Utilities.getUuid(), now, kind, message, JSON.stringify(payload)];
-      });
-      const firstRow = eventsSheet.getLastRow() + 1;
-      eventsSheet.getRange(firstRow, 1, rows.length, EVENT_HEADERS.length).setValues(rows);
-      events.forEach(evt => {
-        evt = evt || {};
-        updatePositionFromEvent_(String(evt.kind || 'event').slice(0, 100),
-          evt.payload && typeof evt.payload === 'object' ? evt.payload : {}, now);
-      });
-    }
+    setStateValue_('updated_at', now);
   } finally {
     lock.releaseLock();
   }
-  // One compact Telegram request per report keeps large scans responsive.
-  // Full event detail remains available in the Events sheet.
-  let notificationErrors = 0;
+
   let notificationsAttempted = 0;
+  let notificationErrors = 0;
+  let notificationErrorType = '';
   const notificationMessage = buildReportNotification_(events);
   if (notificationMessage) {
     notificationsAttempted = 1;
-    try { telegramSend_(notificationMessage); }
-    catch (err) {
+    try {
+      telegramSend_(notificationMessage);
+    } catch (err) {
       notificationErrors++;
-      console.error('Telegram summary notification failed: ' + String(err).slice(0, 250));
+      notificationErrorType = errorType_(err);
+      // Do not log exception text: UrlFetch errors can include the Telegram bot URL.
+      console.error('Telegram report notification failed (' + notificationErrorType + ').');
     }
   }
+
+  const runEndCount = events.filter(evt => String((evt && evt.kind) || '') === 'run_end').length;
+  const delivery = {
+    report_id: makeReportId_(snapshot, events),
+    recorded_at: new Date().toISOString(),
+    events_received: events.length,
+    events_saved: eventRows.length,
+    positions_updated: positionsUpdated,
+    run_end_events_received: runEndCount,
+    run_end_events_saved: runEndCount,
+    notifications_attempted: notificationsAttempted,
+    notification_errors: notificationErrors,
+    notification_error_type: notificationErrorType,
+    notification_status: notificationErrors ? 'failed' : (notificationsAttempted ? 'sent' : 'skipped')
+  };
+
+  let deliveryMetadataSaved = false;
+  try {
+    deliveryMetadataSaved = persistReportDeliveryMetadata_(reportSnapshot, delivery);
+  } catch (err) {
+    console.error('Could not save report-delivery metadata (' + errorType_(err) + ').');
+  }
+
   return jsonOutput_({
     ok: true,
-    events_saved: events.length,
-    notifications_attempted: notificationsAttempted,
-    notification_errors: notificationErrors
+    ...delivery,
+    delivery_metadata_saved: deliveryMetadataSaved
   });
+}
+
+function makeReportId_(snapshot, events) {
+  return [
+    String(snapshot.run_started_at || ''),
+    String(snapshot.run_finished_at || ''),
+    String(snapshot.run_mode || ''),
+    String(snapshot.run_status || ''),
+    String(events.length)
+  ].join('|');
+}
+
+function persistReportDeliveryMetadata_(sourceSnapshot, delivery) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const state = getBotState_();
+    const current = state.snapshot && typeof state.snapshot === 'object' ? state.snapshot : {};
+    const sameRun =
+      String(current.run_started_at || '') === String(sourceSnapshot.run_started_at || '') &&
+      String(current.run_finished_at || '') === String(sourceSnapshot.run_finished_at || '') &&
+      String(current.run_mode || '') === String(sourceSnapshot.run_mode || '');
+    if (!sameRun) {
+      console.error('Report-delivery metadata skipped because a newer run snapshot is stored.');
+      return false;
+    }
+    current.report_delivery = delivery;
+    setStateValue_('snapshot_json', JSON.stringify(current));
+    setStateValue_('updated_at', new Date().toISOString());
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function serializeJsonCell_(value, maxChars) {
+  let serialized;
+  try {
+    serialized = JSON.stringify(value);
+  } catch (_) {
+    serialized = JSON.stringify({ serialization_error: true });
+  }
+  if (serialized === undefined) serialized = 'null';
+  if (serialized.length <= maxChars) return serialized;
+
+  let previewLength = Math.max(100, maxChars - 180);
+  let compact = '';
+  while (previewLength > 0) {
+    compact = JSON.stringify({
+      _truncated: true,
+      original_characters: serialized.length,
+      preview: serialized.slice(0, previewLength)
+    });
+    if (compact.length <= maxChars) return compact;
+    previewLength -= 100;
+  }
+  return JSON.stringify({ _truncated: true, original_characters: serialized.length });
+}
+
+function errorType_(err) {
+  return String(err && err.name ? err.name : 'Error').replace(/[^A-Za-z0-9_]/g, '').slice(0, 80) || 'Error';
 }
 
 function buildReportNotification_(events) {
@@ -294,30 +401,35 @@ function buildReportNotification_(events) {
     top_coins_market_scan: 3,
     portfolio_run_summary: 4,
     position_monitor_summary: 4,
-    run_end: 5
+    run_start: 5,
+    runner_booting: 6,
+    run_end: 7
   };
   const indexed = (Array.isArray(events) ? events : [])
     .map((evt, index) => ({ evt: evt || {}, index: index }))
     .filter(item => Object.prototype.hasOwnProperty.call(priority, String(item.evt.kind || '')))
     .sort((a, b) => priority[String(a.evt.kind || '')] - priority[String(b.evt.kind || '')] || a.index - b.index);
   if (!indexed.length) return '';
-  // Always preserve the final run status, even if higher-priority alerts exist.
+
+  // Always preserve the latest run_end, even when higher-priority alerts exist.
   const runEnd = indexed.filter(item => String(item.evt.kind || '') === 'run_end').slice(-1)[0] || null;
   const chosen = indexed
     .filter(item => String(item.evt.kind || '') !== 'run_end')
     .slice(0, 5);
   if (runEnd) chosen.push(runEnd);
   chosen.sort((a, b) => a.index - b.index);
+
   const lines = ['🤖 گزارش Breakout V1 Dynamic'];
   chosen.forEach(item => {
     const evt = item.evt;
     const message = String(evt.message || evt.kind || 'event').trim().slice(0, 520);
-    lines.push('\\n' + message);
+    lines.push('\n' + message);
   });
+  if (!runEnd) lines.push('\n⚠️ رویداد run_end در این گزارش وجود ندارد؛ وضعیت نهایی اجرا تأیید نشده است.');
   if (indexed.length > chosen.length) {
-    lines.push('\\n… ' + (indexed.length - chosen.length) + ' رویداد مهم دیگر در تب Events ذخیره شد.');
+    lines.push('\n… ' + (indexed.length - chosen.length) + ' رویداد مهم دیگر در تب Events ذخیره شد.');
   }
-  return lines.join('\\n').slice(0, 3500);
+  return lines.join('\n').slice(0, 3500);
 }
 
 function saveEvent_(evt) {
@@ -350,15 +462,16 @@ function savePositionRow_(info, obj) {
   if (info.row) info.sheet.getRange(info.row, 1, 1, POSITION_HEADERS.length).setValues([row]);
   else info.sheet.appendRow(row);
 }
-function updatePositionFromEvent_(kind, payload, now) {
-  const id = payload.position_id ? String(payload.position_id) : '';
-  if (!id) return;
-  const info = getPositionRowInfo_(id);
-  const old = info.object || {};
-  const obj = Object.assign({}, old);
+function updatePositionObjectFromEvent_(oldObject, kind, payload, now) {
+  const id = payload && payload.position_id ? String(payload.position_id) : '';
+  if (!id) return null;
+  if (['position_open', 'position_recovered', 'position_update', 'position_snapshot', 'position_closed'].indexOf(kind) < 0) return null;
+
+  const obj = Object.assign({}, oldObject || {});
   obj.position_id = id;
   obj.updated_at = now;
   if (!obj.created_at) obj.created_at = now;
+
   if (kind === 'position_open' || kind === 'position_recovered') {
     obj.symbol = payload.symbol || 'UNKNOWN';
     obj.side = payload.side || 'UNKNOWN';
@@ -369,13 +482,13 @@ function updatePositionFromEvent_(kind, payload, now) {
     obj.current_stop = asNumberOrNull_(payload.current_stop !== undefined ? payload.current_stop : (payload.exchange_stop_last !== undefined ? payload.exchange_stop_last : payload.trail));
     obj.target = payload.tp_active ? asNumberOrNull_(payload.target !== undefined ? payload.target : (payload.exchange_target_last !== undefined ? payload.exchange_target_last : payload.tp_px)) : null;
     obj.opened_at_ms = asNumberOrNull_(payload.opened_at_ms !== undefined ? payload.opened_at_ms : payload.entry_time_ms) || Date.now();
-    obj.data_json = JSON.stringify(payload);
+    obj.data_json = serializeJsonCell_(payload, MAX_CELL_JSON_CHARS);
   } else if (kind === 'position_update') {
     const stop = asNumberOrNull_(payload.current_stop);
     const target = asNumberOrNull_(payload.target);
     if (stop !== null) obj.current_stop = stop;
     if (target !== null) obj.target = target;
-    obj.data_json = JSON.stringify(payload);
+    obj.data_json = serializeJsonCell_(payload, MAX_CELL_JSON_CHARS);
   } else if (kind === 'position_snapshot') {
     const qty = asNumberOrNull_(payload.qty);
     const entry = asNumberOrNull_(payload.entry_price);
@@ -385,7 +498,7 @@ function updatePositionFromEvent_(kind, payload, now) {
     if (entry !== null) obj.entry_price = entry;
     if (stop !== null) obj.current_stop = stop;
     if (target !== null) obj.target = target;
-    obj.data_json = JSON.stringify(payload);
+    obj.data_json = serializeJsonCell_(payload, MAX_CELL_JSON_CHARS);
   } else if (kind === 'position_closed') {
     obj.status = 'CLOSED';
     const qty = asNumberOrNull_(payload.qty);
@@ -405,11 +518,111 @@ function updatePositionFromEvent_(kind, payload, now) {
     if (pnlModel !== null) obj.net_pnl_model = pnlModel;
     if (exchangePnl !== null) obj.exchange_closed_pnl = exchangePnl;
     obj.exit_reason = payload.exit_reason || '';
-    obj.data_json = JSON.stringify(payload);
-  } else {
-    return;
+    obj.data_json = serializeJsonCell_(payload, MAX_CELL_JSON_CHARS);
   }
-  savePositionRow_(info, obj);
+  return obj;
+}
+
+function positionRowToObject_(row) {
+  const obj = {};
+  POSITION_HEADERS.forEach((header, index) => obj[header] = row[index] === undefined ? '' : row[index]);
+  return obj;
+}
+
+function positionObjectToRow_(obj) {
+  return POSITION_HEADERS.map(header => obj[header] === undefined ? '' : obj[header]);
+}
+
+function persistPositionEventsBatch_(events, now) {
+  const relevantKinds = {
+    position_open: true,
+    position_recovered: true,
+    position_update: true,
+    position_snapshot: true,
+    position_closed: true
+  };
+  const relevant = (Array.isArray(events) ? events : []).filter(evt =>
+    evt && relevantKinds[String(evt.kind || '')] &&
+    evt.payload && typeof evt.payload === 'object' && evt.payload.position_id
+  );
+  if (!relevant.length) return 0;
+
+  const sheet = getSheet_('Positions', POSITION_HEADERS);
+  const lastRow = sheet.getLastRow();
+  const existingRows = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, POSITION_HEADERS.length).getValues()
+    : [];
+  const byId = Object.create(null);
+
+  existingRows.forEach((row, index) => {
+    const id = String(row[0] || '');
+    if (!id) return;
+    if (Object.prototype.hasOwnProperty.call(byId, id)) {
+      throw new Error('Duplicate position_id in Positions sheet; refusing an ambiguous batch update.');
+    }
+    byId[id] = { existingIndex: index, row: row.slice(), isNew: false, changed: false };
+  });
+
+  const newOrder = [];
+  relevant.forEach(evt => {
+    const kind = String(evt.kind || '');
+    const payload = evt.payload || {};
+    const id = String(payload.position_id);
+    let entry = byId[id];
+    if (!entry) {
+      entry = {
+        existingIndex: -1,
+        row: new Array(POSITION_HEADERS.length).fill(''),
+        isNew: true,
+        changed: false
+      };
+      byId[id] = entry;
+      newOrder.push(id);
+    }
+    const updated = updatePositionObjectFromEvent_(positionRowToObject_(entry.row), kind, payload, now);
+    if (!updated) return;
+    entry.row = positionObjectToRow_(updated);
+    entry.changed = true;
+  });
+
+  const changedIndexes = Object.keys(byId)
+    .map(id => byId[id])
+    .filter(entry => !entry.isNew && entry.changed)
+    .map(entry => entry.existingIndex)
+    .sort((a, b) => a - b);
+
+  // Write adjacent changed rows together without rewriting unrelated history.
+  let cursor = 0;
+  while (cursor < changedIndexes.length) {
+    const first = changedIndexes[cursor];
+    const groupIndexes = [first];
+    cursor++;
+    while (cursor < changedIndexes.length && changedIndexes[cursor] === groupIndexes[groupIndexes.length - 1] + 1) {
+      groupIndexes.push(changedIndexes[cursor]);
+      cursor++;
+    }
+    const groupRows = groupIndexes.map(index => {
+      const entry = Object.keys(byId).map(id => byId[id]).find(item => !item.isNew && item.existingIndex === index);
+      return entry.row;
+    });
+    sheet.getRange(first + 2, 1, groupRows.length, POSITION_HEADERS.length).setValues(groupRows);
+  }
+
+  const newRows = newOrder.map(id => byId[id].row);
+  if (newRows.length) {
+    const firstNewRow = sheet.getLastRow() + 1;
+    sheet.getRange(firstNewRow, 1, newRows.length, POSITION_HEADERS.length).setValues(newRows);
+  }
+  return changedIndexes.length + newRows.length;
+}
+
+function updatePositionFromEvent_(kind, payload, now) {
+  payload = payload && typeof payload === 'object' ? payload : {};
+  const id = payload.position_id ? String(payload.position_id) : '';
+  if (!id) return;
+  const info = getPositionRowInfo_(id);
+  const updated = updatePositionObjectFromEvent_(info.object || {}, kind, payload, now);
+  if (updated) savePositionRow_(info, updated);
 }
 
 function telegramSend_(text, chatIdOverride) {
@@ -433,7 +646,7 @@ function telegramSend_(text, chatIdOverride) {
     });
     const data = safeJsonParse_(response.getContentText(), {});
     if (response.getResponseCode() < 200 || response.getResponseCode() >= 300 || !data.ok) {
-      throw new Error('Telegram sendMessage failed: ' + response.getContentText().slice(0, 400));
+      throw new Error('Telegram sendMessage failed with HTTP ' + response.getResponseCode() + '.');
     }
     lastData = data;
   });
@@ -520,7 +733,7 @@ function handleTelegramWebhook_(e, params) {
   try {
     telegramSend_(answer, chatId);
   } catch (err) {
-    console.error('Could not answer Telegram command: ' + err);
+    console.error('Could not answer Telegram command (' + errorType_(err) + ').');
   }
 
   return telegramWebhookAck_('OK');
@@ -546,7 +759,9 @@ function executeTelegramCommand_(raw) {
       'منبع داده: ' + (snap.signal_data_source || '—'),
       'سفارش‌گذاری فعال: ' + (snap.trading_enabled ? 'بله (تنظیم‌شده)' : 'خیر'),
       'ورودهای جدید: ' + (state.paused ? '⏸️ متوقف' : '✅ فعال'),
-      'آخرین ثبت پایگاه داده: ' + formatTime_(state.updated_at)
+      'آخرین ثبت پایگاه داده: ' + formatTime_(state.updated_at),
+      'رویدادهای گزارش اخیر: ' + (snap.report_delivery ? (snap.report_delivery.events_saved + '/' + snap.report_delivery.events_received) : 'تأیید نشده'),
+      'وضعیت اعلان Telegram: ' + (snap.report_delivery ? snap.report_delivery.notification_status : 'تأیید نشده')
     ];
     const perSymbol = snap.symbol_status || {};
     Object.keys(perSymbol).slice(0, 10).forEach(symbol => {
