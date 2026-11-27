@@ -235,6 +235,15 @@ const reportSnapshot = {
   run_finished_at: '2026-11-26 10:00:45 UTC',
   analyze_top_coins: true,
   trading_enabled: false,
+  bot_trading_enabled_configured: false,
+  portfolio_limits: {
+    max_open_positions: 7,
+    max_new_entries_per_run: 4,
+    risk_per_position_pct: 6.5,
+    portfolio_max_notional_x: 9,
+    portfolio_margin_budget_pct: 100,
+    max_exchange_leverage_cap: 10
+  },
   market_scan: { requested_count: 100, analyzed_count: 100, error_count: 0, complete: true }
 };
 const response = context.handleReport_({
@@ -295,6 +304,54 @@ assert.equal(updateData.notification_status, 'failed', 'Telegram API failure mus
 assert.equal(updateData.notification_errors, 1);
 assert.equal(context.getBotState_().snapshot.report_delivery.notification_status, 'failed');
 
+const botSnapshotBeforeMonitor = context.getBotState_().bot_snapshot;
+assert.equal(botSnapshotBeforeMonitor.trading_enabled, false, 'last Bot snapshot should be stored separately');
+
+setTelegramFailure(false);
+const monitorSnapshot = {
+  run_status: 'success',
+  run_mode: 'position_monitor',
+  run_started_at: '2026-11-26 10:05:00 UTC',
+  run_finished_at: '2026-11-26 10:05:08 UTC',
+  trading_enabled: false,
+  effective_trading_enabled: false,
+  bot_trading_enabled_configured: true,
+  analysis_performed: false,
+  portfolio_limits: {
+    max_open_positions: 7,
+    max_new_entries_per_run: 2,
+    risk_per_position_pct: 3,
+    portfolio_max_notional_x: 4.2,
+    portfolio_margin_budget_pct: 65,
+    max_exchange_leverage_cap: 5
+  }
+};
+const monitorResponse = context.handleReport_({
+  events: [
+    { kind: 'position_monitor_summary', message: 'monitor completed', payload: {} },
+    { kind: 'run_end', message: 'MONITOR FINISHED', payload: { status: 'success' } }
+  ],
+  strategy_state: { symbols: {} },
+  snapshot: monitorSnapshot
+});
+assert.equal(JSON.parse(monitorResponse.content).ok, true);
+const stateAfterMonitor = context.getBotState_();
+assert.equal(stateAfterMonitor.snapshot.run_mode, 'position_monitor');
+assert.equal(stateAfterMonitor.monitor_snapshot.trading_enabled, false);
+assert.equal(stateAfterMonitor.monitor_snapshot.bot_trading_enabled_configured, true);
+assert.equal(stateAfterMonitor.bot_snapshot.trading_enabled, false, 'monitor must not overwrite the last Bot trading flag');
+assert.equal(stateAfterMonitor.monitor_snapshot.report_delivery.notification_status, 'sent');
+
+const statusText = context.buildStatusMessage_(stateAfterMonitor);
+assert.ok(statusText.includes('تنظیم سفارش‌گذاری Bot در GitHub: ✅ فعال'));
+assert.ok(statusText.includes('سفارش‌گذاری در آخرین اجرای Bot: ⛔ غیرفعال'));
+assert.ok(statusText.includes('Position Monitor (فقط مدیریت پوزیشن؛ بدون ورود)'));
+assert.ok(statusText.includes('حداکثر ورود جدید در هر اجرا: 2'));
+assert.ok(statusText.includes('سقف Notional کل: 4.2x'));
+assert.ok(statusText.includes('ریسک تنظیمی هر پوزیشن: 3%'));
+assert.ok(statusText.includes('بودجه مارجین: 65%'));
+assert.ok(statusText.includes('سقف اهرم صرافی: 5x'));
+
 const beforeOverflow = eventsSheet.getLastRow();
 assert.throws(
   () => context.handleReport_({
@@ -322,5 +379,8 @@ console.log('PASS: batched position lifecycle update (open -> update -> closed)'
 console.log('PASS: existing position updates use bounded sheet reads and one write');
 console.log('PASS: Telegram delivery failure is recorded for the final workflow verifier');
 console.log('PASS: report-delivery telemetry is stored in BotState snapshot');
+console.log('PASS: Position Monitor cannot overwrite the last Bot order-entry status');
+console.log('PASS: /status distinguishes GitHub Bot setting from the last Bot execution');
+console.log('PASS: /status reports effective configurable portfolio limits');
 console.log('PASS: oversized event batches fail closed without partial append');
 console.log('PASS: oversized state values preserve the previous good value');
