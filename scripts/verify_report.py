@@ -105,12 +105,28 @@ def main() -> int:
         issues.append("final run_status is missing; the final report may not have been persisted")
     if not finished:
         issues.append("run_finished_at is missing")
-    if snapshot.get("trading_enabled") is True:
-        issues.append("snapshot says trading_enabled=true despite the workflow safety lock")
-    if snapshot.get("effective_trading_enabled") is True:
-        issues.append("snapshot says effective_trading_enabled=true despite the workflow safety lock")
-    if as_int(snapshot.get("new_entries_this_run", 0)) > 0:
-        issues.append("new_entries_this_run is greater than zero while order entry is locked")
+    configured_order_entry = snapshot.get(
+        "bot_trading_enabled_configured",
+        snapshot.get("trading_enabled", False),
+    )
+    if args.expected_mode == "position_monitor":
+        if snapshot.get("trading_enabled") is True:
+            issues.append("Position Monitor must keep its own trading_enabled flag false")
+        if snapshot.get("effective_trading_enabled") is True:
+            issues.append("Position Monitor must keep effective_trading_enabled false")
+        if as_int(snapshot.get("new_entries_this_run", 0)) > 0:
+            issues.append("Position Monitor reported a new entry even though its entry path is disabled")
+    else:
+        if bool(snapshot.get("trading_enabled")) != bool(configured_order_entry):
+            issues.append("Bot trading_enabled does not match the configured TRADING_ENABLED value")
+        if bool(snapshot.get("effective_trading_enabled")) and not bool(configured_order_entry):
+            issues.append("effective trading is true while the configured Bot order-entry switch is false")
+        maximum_entries = as_int(limits.get("max_new_entries_per_run")) if isinstance(limits, dict) else -1
+        entries_this_run = as_int(snapshot.get("new_entries_this_run", 0))
+        if entries_this_run < 0 or (maximum_entries >= 0 and entries_this_run > maximum_entries):
+            issues.append("new_entries_this_run is outside the configured MAX_NEW_ENTRIES_PER_RUN limit")
+        if not bool(configured_order_entry) and entries_this_run > 0:
+            issues.append("Bot opened a new entry while TRADING_ENABLED is false")
 
     if args.expected_mode == "four_hour_analysis_and_execution":
         if snapshot.get("analyze_top_coins") is True:
