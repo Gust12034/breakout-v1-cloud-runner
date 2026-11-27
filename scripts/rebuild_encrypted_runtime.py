@@ -72,6 +72,103 @@ def set_integer_assignment(source: str, name: str, allowed_values: set[int], tar
     return pattern.sub(lambda m: f"{m.group(1)}{target}{m.group(3)}", source, count=1)
 
 
+def patch_portfolio_risk_settings(source: str) -> str:
+    """Make the five requested numeric limits runtime-configurable via GitHub Variables."""
+    if "def _env_int(" not in source or "def _env_float(" not in source:
+        import_anchor = "from math import isfinite\n"
+        if import_anchor not in source:
+            raise RuntimeError("Portfolio settings math import anchor not found.")
+        source = source.replace(import_anchor, "import os\nfrom math import isfinite\n", 1)
+        helpers = '''
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer; received an invalid value") from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw.strip())
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be numeric; received an invalid value") from exc
+    if not isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    return value
+'''
+        source = source.replace(import_anchor, import_anchor + helpers, 1)
+
+    replacements = {
+        "MAX_NEW_ENTRIES_PER_RUN": ("4", '_env_int("MAX_NEW_ENTRIES_PER_RUN", 4)'),
+        "RISK_PER_POSITION_PCT": ("6.5", '_env_float("RISK_PER_POSITION_PCT", 6.5)'),
+        "PORTFOLIO_MARGIN_BUDGET_PCT": ("100.0", '_env_float("PORTFOLIO_MARGIN_BUDGET_PCT", 100.0)'),
+        "PORTFOLIO_MAX_NOTIONAL_X": ("9.0", '_env_float("PORTFOLIO_MAX_NOTIONAL_X", 9.0)'),
+        "MAX_EXCHANGE_LEVERAGE_CAP": ("10.0", '_env_float("MAX_EXCHANGE_LEVERAGE_CAP", 10.0)'),
+    }
+    for name, (default, expression) in replacements.items():
+        old_line = f"{name} = {default}"
+        new_line = f"{name} = {expression}"
+        old_count = source.count(old_line)
+        new_count = source.count(new_line)
+        if old_count == 1 and new_count == 0:
+            source = source.replace(old_line, new_line, 1)
+        elif old_count == 0 and new_count == 1:
+            pass
+        else:
+            raise RuntimeError(f"Portfolio setting patch anchor mismatch for {name}.")
+
+    compile(source, "PORTFOLIO_RISK_SETTINGS.py", "exec")
+    return source
+
+
+def patch_portfolio_risk_tests(source: str) -> str:
+    if "import importlib\n" not in source:
+        source = source.replace(
+            "import unittest\nfrom unittest.mock import patch\n",
+            "import importlib\nimport os\nimport unittest\nfrom unittest.mock import patch\n",
+            1,
+        )
+    test_block = r"""
+
+    def test_github_environment_variables_override_numeric_portfolio_settings(self):
+        variables = {
+            "MAX_NEW_ENTRIES_PER_RUN": "2",
+            "PORTFOLIO_MAX_NOTIONAL_X": "4.2",
+            "RISK_PER_POSITION_PCT": "3.0",
+            "PORTFOLIO_MARGIN_BUDGET_PCT": "65",
+            "MAX_EXCHANGE_LEVERAGE_CAP": "5",
+        }
+        try:
+            with patch.dict(os.environ, variables):
+                importlib.reload(settings_module)
+                values = settings_module.get_portfolio_risk_settings()
+                self.assertEqual(values["max_new_entries_per_run"], 2)
+                self.assertEqual(values["portfolio_max_notional_x"], 4.2)
+                self.assertEqual(values["risk_per_position_pct"], 3.0)
+                self.assertEqual(values["portfolio_risk_pct"], 21.0)
+                self.assertEqual(values["portfolio_margin_budget_pct"], 65.0)
+                self.assertEqual(values["max_exchange_leverage_cap"], 5.0)
+        finally:
+            importlib.reload(settings_module)
+"""
+    if "def test_github_environment_variables_override_numeric_portfolio_settings(" not in source:
+        anchor = "\n\nif __name__ == '__main__':"
+        if anchor not in source:
+            anchor = '\n\nif __name__ == "__main__":'
+        if anchor not in source:
+            raise RuntimeError("Portfolio-risk test insertion anchor not found.")
+        source = source.replace(anchor, test_block + anchor, 1)
+    compile(source, "tests/test_portfolio_risk.py", "exec")
+    return source
+
+
 def replace_test_assertion(source: str, old: str, new: str) -> str:
     old_count = source.count(old)
     new_count = source.count(new)
@@ -549,6 +646,23 @@ def patch_universe(source: str) -> str:
     return updated
 
 def patch_runner(source: str) -> str:
+    old_switch = '    trading_enabled = os.getenv("TRADING_ENABLED", "false").lower() == "true"\n'
+    new_switch = old_switch + '    bot_trading_enabled_configured = read_bool_env("BOT_TRADING_ENABLED", default=trading_enabled)\n'
+    if old_switch in source:
+        source = source.replace(old_switch, new_switch, 1)
+    elif 'bot_trading_enabled_configured = read_bool_env("BOT_TRADING_ENABLED", default=trading_enabled)' not in source:
+        raise RuntimeError("Runner Bot-trading-status setting anchor not found.")
+
+    old_snapshot_flag = '"trading_enabled": trading_enabled, "trade_top_coins": trade_top_coins,'
+    new_snapshot_flag = (
+        '"trading_enabled": trading_enabled, "bot_trading_enabled_configured": bot_trading_enabled_configured,'
+        '\n        "trade_top_coins": trade_top_coins,'
+    )
+    if old_snapshot_flag in source:
+        source = source.replace(old_snapshot_flag, new_snapshot_flag, 1)
+    elif '"bot_trading_enabled_configured": bot_trading_enabled_configured' not in source:
+        raise RuntimeError("Runner Bot-trading-status snapshot anchor not found.")
+
     old_heading = 'f"📊 اسکن بازار بر اساس فهرست ثابت ۱۰۰ کوین انجام شد.\\n"'
     new_heading = 'f"📊 اسکن حداکثر ۱۰۰ قرارداد فعال Bitget USDT-Futures بر اساس حجم ۲۴ساعته انجام شد.\\n"'
     if old_heading in source:
@@ -877,7 +991,7 @@ def main() -> int:
                 if info.filename == config_name:
                     text = data.decode("utf-8")
                     text = set_integer_assignment(text, "MAX_OPEN_POSITIONS", {3, 7}, MAX_OPEN_POSITIONS)
-                    text = set_integer_assignment(text, "MAX_NEW_ENTRIES_PER_RUN", {1, 4}, MAX_NEW_ENTRIES_PER_RUN)
+                    text = patch_portfolio_risk_settings(text)
                     text = text.replace(
                         "With MAX_OPEN_POSITIONS=3 and RISK_PER_POSITION_PCT=6.5",
                         "With MAX_OPEN_POSITIONS=7 and RISK_PER_POSITION_PCT=6.5",
@@ -923,6 +1037,7 @@ def main() -> int:
                     ]
                     for old, new in replacements:
                         text = replace_test_assertion(text, old, new)
+                    text = patch_portfolio_risk_tests(text)
                     compile(text, tests_name, "exec")
                     patched_tests = text.encode("utf-8")
                     data = patched_tests
