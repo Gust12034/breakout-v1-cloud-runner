@@ -13,8 +13,9 @@ def require(pattern: str, source: str, description: str) -> None:
         raise SystemExit("[FAIL] " + description)
     print("[PASS] " + description)
 
-require(r"^\s*TRADING_ENABLED:\s*'false'(?:\s+#.*)?$", BOT, "Bot order-entry lock is hardcoded false")
+require(r"^\s*TRADING_ENABLED:\s*\$\{\{\s*vars\.TRADING_ENABLED\s*\|\|\s*'false'\s*\}\}\s*$", BOT, "Bot Demo order entry is configurable via repository variable with a false default")
 require(r"^\s*LIVE_TRADING:\s*'false'(?:\s+#.*)?$", BOT, "Bot mainnet lock is hardcoded false")
+require(r"TRADING_ENABLED must be exactly 'true' or 'false'", BOT, "Bot workflow rejects ambiguous order-entry settings")
 require(r"^\s*TRADING_ENABLED:\s*'false'(?:\s+#.*)?$", MONITOR, "Position Monitor order-entry lock is hardcoded false")
 require(r"^\s*LIVE_TRADING:\s*'false'(?:\s+#.*)?$", MONITOR, "Position Monitor mainnet lock is hardcoded false")
 require(r"^\s*ANALYZE_TOP_COINS:\s*'false'(?:\s+#.*)?$", MONITOR, "Position Monitor cannot scan the market")
