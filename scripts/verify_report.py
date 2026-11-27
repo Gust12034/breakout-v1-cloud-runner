@@ -109,6 +109,8 @@ def main() -> int:
         "bot_trading_enabled_configured",
         snapshot.get("trading_enabled", False),
     )
+    if not isinstance(snapshot.get("bot_trading_enabled_configured"), bool):
+        issues.append("bot_trading_enabled_configured is missing; update the encrypted runtime and workflow")
     if args.expected_mode == "position_monitor":
         if snapshot.get("trading_enabled") is True:
             issues.append("Position Monitor must keep its own trading_enabled flag false")
