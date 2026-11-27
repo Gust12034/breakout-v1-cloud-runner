@@ -809,7 +809,9 @@ function buildStatusMessage_(state) {
     'ورودهای جدید (کنترل دستی /pause): ' + (state.paused ? '⏸️ متوقف' : '✅ فعال'),
     'آخرین اجرای Bot: ' + (botSnap.run_status
       ? (botSnap.run_status + ' | ' + formatTime_(botSnap.run_finished_at || botSnap.run_started_at))
-      : 'هنوز ثبت نشده'),
+      : (isMonitor
+        ? 'snapshot مستقل Bot از قبل از تفکیک گزارش‌ها موجود نیست؛ از اجرای بعدی Bot ثبت می‌شود'
+        : 'هنوز ثبت نشده')),
     'آخرین پایش پوزیشن: ' + (monitorSnap.run_status
       ? (monitorSnap.run_status + ' | ' + formatTime_(monitorSnap.run_finished_at || monitorSnap.run_started_at))
       : 'هنوز ثبت نشده'),
