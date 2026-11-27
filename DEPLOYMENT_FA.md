@@ -45,13 +45,42 @@
 
 ## ۳) GitHub Actions Variables
 
-برای شروع فقط این Variable را در `Settings → Secrets and variables → Actions → Variables` بساز:
+متغیرهای زیر را در `Settings → Secrets and variables → Actions → Variables` می‌توانی بسازی یا تغییر بدهی. نام‌ها و مقادیر باید دقیقاً مطابق جدول باشند:
 
-| Variable | مقدار اولیه |
-|---|---|
-| `TRADING_ENABLED` | `false` |
+| Variable | مقدار پیشنهادی اولیه | کاربرد |
+|---|---:|---|
+| `TRADING_ENABLED` | `false` | کلید روشن/خاموش‌کردن سفارش‌گذاری Bitget Classic Demo |
+| `TRADE_TOP_COINS` | `true` | اگر true باشد، ورودها از Universe انتخابی Top-N و قراردادهای قابل‌اجرای Demo انجام می‌شوند |
+| `TRADE_SYMBOLS` | `BTCUSDT` | نمادهای دستی وقتی `TRADE_TOP_COINS=false` است |
+| `ANALYZE_TOP_COINS` | `true` | فعال‌بودن اسکن بازار |
+| `TOP_COINS_COUNT` | `100` | سقف تعداد بازارهای اسکن‌شده |
+| `ENABLE_LONGS` | `true` | اجازهٔ بررسی سیگنال Long |
+| `ENABLE_SHORTS` | `true` | اجازهٔ بررسی سیگنال Short |
+| `LEN_N` | `48` | طول محاسبات استراتژی |
+| `V1D_VOL_MULT` | `1.5` | ضریب حجم |
+| `V1D_ADX_MAX` | `0.0` | فیلتر ADX |
+| `ATR_K` | `2.5` | ضریب ATR |
+| `V1D_EXIT_MODE` | `Chandelier + BE` | منطق خروج |
+| `V1D_BE_AT` | `1.0` | آستانهٔ Break-even |
+| `V1D_TRAIL_M` | `4.0` | ضریب Trailing |
+| `V1D_DON_M` | `20` | طول Donchian |
+| `RR` | `2.0` | نسبت هدف به ریسک |
 
-مقادیر پیش‌فرض بقیهٔ تنظیمات در فایل‌های Workflow تعریف شده‌اند؛ بنابراین فعلاً لازم نیست ۱۸ متغیر دیگر را جداگانه بسازی. تنظیمات فعلی payload رمزگذاری‌شده: حداکثر ۷ پوزیشن هم‌زمان، حداکثر ۴ ورودی جدید در هر اجرای تحلیل و ریسک تنظیمی ۶٫۵٪ برای هر پوزیشن. بنابراین سقف ریسک نظری تجمیعی در صورت پرشدن هر ۷ جایگاه و برخورد همه به حدضرر اولیه تا ۴۵٫۵٪ Equity است؛ این سطح ریسک بسیار تهاجمی است. سقف Notional کل عمداً ۹x Equity باقی مانده و به‌طور متوسط بین ۷ جایگاه تقسیم می‌شود (۱٫۲۸۵۷x برای هر جایگاه).
+**فعال‌کردن سفارش‌های Demo:**
+
+1. مطمئن شو سه Secret مربوط به Bitget با API Key مخصوص Classic Futures Demo تنظیم شده‌اند؛ کلید Mainnet را استفاده نکن.
+2. Variable با نام دقیق `TRADING_ENABLED` بساز و مقدار آن را `true` (بدون کوتیشن) قرار بده.
+3. Workflow با نام **Breakout V1 Dynamic Bitget Classic Demo Bot** را دستی اجرا کن.
+4. در لاگ ابتدای Runner، `trading_enabled=True` و `effective_trading_enabled=True` را بررسی کن. در گزارش نهایی باید تعداد ورودی‌های جدید و وضعیت سفارش‌ها را ببینی.
+5. برای توقف ورودهای جدید، مقدار Variable را دوباره `false` کن یا در Telegram دستور `/pause` بفرست. اجرای Position Monitor همچنان به مدیریت پوزیشن‌های موجود ادامه می‌دهد.
+
+اگر می‌خواهی فقط BTCUSDT سفارش‌گذاری شود، `TRADE_TOP_COINS=false` و `TRADE_SYMBOLS=BTCUSDT` بگذار. با مقدار `TRADE_TOP_COINS=true`، مقدار `SYMBOLS=BTCUSDT` به‌تنهایی محدودیت BTC ایجاد نمی‌کند؛ Runner Universe قابل‌اجرای Demo را جایگزین فهرست دستی می‌کند. در آخرین بررسی، ۱۰۰ نماد تحلیل شده بودند و ۱۸ نماد در فهرست قابل‌اجرای Demo قرار داشتند.
+
+**دربارهٔ Telegram:** متغیر `TELEGRAM_ENABLED` در Workflow فعلی خوانده نمی‌شود و سفارش‌گذاری را تغییر نمی‌دهد. اعلان Telegram از Script Properties با نام‌های `TELEGRAM_BOT_TOKEN` و `TELEGRAM_CHAT_ID` در Google Apps Script استفاده می‌کند.
+
+**قفل بازار واقعی:** `LIVE_TRADING` در Workflow به‌صورت ثابت `false` است و نباید آن را به Variable قابل‌تنظیم تبدیل کنی. این پروژه فقط برای Bitget Classic Demo طراحی شده است.
+
+**تنظیمات ریسک عددی:** در نسخهٔ فعلی این حدود داخل payload رمزگذاری‌شده قرار دارند، نه در GitHub Variables: حداکثر ۷ پوزیشن هم‌زمان، حداکثر ۴ ورودی جدید در هر اجرا، ریسک تنظیمی ۶٫۵٪ برای هر پوزیشن، بودجهٔ مارجین ۱۰۰٪، سقف Notional کل ۹x و سقف اهرم صرافی ۱۰x. ریسک نظری تجمیعی در صورت پرشدن ۷ جایگاه و برخورد همه به حدضرر اولیه ۴۵٫۵٪ Equity است؛ این مقدار بسیار تهاجمی است. تغییر این اعداد نیازمند به‌روزرسانی تنظیمات داخل runtime و بازسازی payload رمزگذاری‌شده است؛ تغییر GitHub Variables به‌تنهایی آن‌ها را عوض نمی‌کند.
 
 ## ۴) ساخت Fine-grained Personal Access Token
 
