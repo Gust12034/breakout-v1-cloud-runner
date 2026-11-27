@@ -64,6 +64,8 @@ function initializeDatabase() {
   ensureStateValueIfMissing_('paused', 'false');
   ensureStateValueIfMissing_('strategy_state_json', '{}');
   ensureStateValueIfMissing_('snapshot_json', '{}');
+  ensureStateValueIfMissing_('bot_snapshot_json', '{}');
+  ensureStateValueIfMissing_('monitor_snapshot_json', '{}');
   ensureStateValueIfMissing_('updated_at', new Date().toISOString());
 
   active.toast('جداول Breakout V1 Dynamic بررسی و آماده شدند.', APP_NAME, 5);
@@ -228,6 +230,8 @@ function getBotState_() {
     paused: values.paused === 'true' || values.paused === '1',
     strategy_state: safeJsonParse_(values.strategy_state_json, {}),
     snapshot: safeJsonParse_(values.snapshot_json, {}),
+    bot_snapshot: safeJsonParse_(values.bot_snapshot_json, {}),
+    monitor_snapshot: safeJsonParse_(values.monitor_snapshot_json, {}),
     updated_at: values.updated_at || null
   };
 }
@@ -275,6 +279,11 @@ function handleReport_(body) {
     // Commit the final snapshot only after event/position persistence succeeds.
     setStateValue_('strategy_state_json', JSON.stringify(strategyState));
     setStateValue_('snapshot_json', JSON.stringify(snapshot));
+    if (String(snapshot.run_mode || '') === 'position_monitor') {
+      setStateValue_('monitor_snapshot_json', JSON.stringify(snapshot));
+    } else {
+      setStateValue_('bot_snapshot_json', JSON.stringify(snapshot));
+    }
     setStateValue_('updated_at', now);
   } finally {
     lock.releaseLock();
@@ -351,6 +360,23 @@ function persistReportDeliveryMetadata_(sourceSnapshot, delivery) {
     }
     current.report_delivery = delivery;
     setStateValue_('snapshot_json', JSON.stringify(current));
+
+    // Maintain separate latest snapshots for Bot and Position Monitor.
+    // The monitor's own trading_enabled=false must not overwrite the last Bot run.
+    const runSnapshotKey = String(sourceSnapshot.run_mode || '') === 'position_monitor'
+      ? 'monitor_snapshot_json'
+      : 'bot_snapshot_json';
+    const stateValues = getStateValues_();
+    const runSnapshot = safeJsonParse_(stateValues[runSnapshotKey], {});
+    const sameTypedRun =
+      String(runSnapshot.run_started_at || '') === String(sourceSnapshot.run_started_at || '') &&
+      String(runSnapshot.run_finished_at || '') === String(sourceSnapshot.run_finished_at || '') &&
+      String(runSnapshot.run_mode || '') === String(sourceSnapshot.run_mode || '');
+    if (sameTypedRun) {
+      runSnapshot.report_delivery = delivery;
+      setStateValue_(runSnapshotKey, JSON.stringify(runSnapshot));
+    }
+
     setStateValue_('updated_at', new Date().toISOString());
     return true;
   } finally {
@@ -743,6 +769,69 @@ function handleTelegramWebhook_(e, params) {
   return telegramWebhookAck_('OK');
 }
 
+function buildStatusMessage_(state) {
+  state = state && typeof state === 'object' ? state : {};
+  const snap = state.snapshot && typeof state.snapshot === 'object' ? state.snapshot : {};
+  const botSnap = state.bot_snapshot && typeof state.bot_snapshot === 'object'
+    ? state.bot_snapshot
+    : (String(snap.run_mode || '') === 'position_monitor' ? {} : snap);
+  const monitorSnap = state.monitor_snapshot && typeof state.monitor_snapshot === 'object'
+    ? state.monitor_snapshot
+    : (String(snap.run_mode || '') === 'position_monitor' ? snap : {});
+  const limits = snap.portfolio_limits && typeof snap.portfolio_limits === 'object'
+    ? snap.portfolio_limits
+    : (botSnap.portfolio_limits && typeof botSnap.portfolio_limits === 'object' ? botSnap.portfolio_limits : {});
+  const configured = typeof snap.bot_trading_enabled_configured === 'boolean'
+    ? snap.bot_trading_enabled_configured
+    : (typeof botSnap.trading_enabled === 'boolean' ? botSnap.trading_enabled : null);
+  const isMonitor = String(snap.run_mode || '') === 'position_monitor';
+  const boolText = value => value === null || value === undefined
+    ? 'نامشخص'
+    : (value ? '✅ فعال' : '⛔ غیرفعال');
+
+  const lines = [
+    '📊 وضعیت ذخیره‌شده Breakout V1 Dynamic',
+    'وضعیت آخرین اجرا: ' + (snap.run_status || 'نامشخص'),
+    'نوع آخرین اجرا: ' + (isMonitor ? 'Position Monitor (فقط مدیریت پوزیشن؛ بدون ورود)' : 'Bot (تحلیل و بررسی ورود)'),
+    'شروع آخرین اجرا: ' + formatTime_(snap.run_started_at),
+    'پایان آخرین اجرا: ' + formatTime_(snap.run_finished_at),
+    'آخرین پاسخ موفق API: ' + formatTime_(snap.last_api_success_at),
+    'نمادها: ' + (Array.isArray(snap.symbols) ? snap.symbols.join(', ') : '—'),
+    'منبع داده: ' + (snap.signal_data_source || '—'),
+    'تنظیم سفارش‌گذاری Bot در GitHub: ' + boolText(configured),
+    'سفارش‌گذاری در آخرین اجرای Bot: ' + (typeof botSnap.trading_enabled === 'boolean' ? boolText(botSnap.trading_enabled) : 'هنوز اجرای Bot ثبت نشده'),
+    'ورودهای جدید (کنترل دستی /pause): ' + (state.paused ? '⏸️ متوقف' : '✅ فعال'),
+    'آخرین اجرای Bot: ' + (botSnap.run_status
+      ? (botSnap.run_status + ' | ' + formatTime_(botSnap.run_finished_at || botSnap.run_started_at))
+      : 'هنوز ثبت نشده'),
+    'آخرین پایش پوزیشن: ' + (monitorSnap.run_status
+      ? (monitorSnap.run_status + ' | ' + formatTime_(monitorSnap.run_finished_at || monitorSnap.run_started_at))
+      : 'هنوز ثبت نشده'),
+    'حداکثر ورود جدید در هر اجرا: ' + (limits.max_new_entries_per_run !== undefined ? limits.max_new_entries_per_run : '—'),
+    'سقف Notional کل: ' + (limits.portfolio_max_notional_x !== undefined ? formatNumber_(limits.portfolio_max_notional_x, 4) + 'x' : '—'),
+    'ریسک تنظیمی هر پوزیشن: ' + (limits.risk_per_position_pct !== undefined ? formatNumber_(limits.risk_per_position_pct, 4) + '%' : '—'),
+    'بودجه مارجین: ' + (limits.portfolio_margin_budget_pct !== undefined ? formatNumber_(limits.portfolio_margin_budget_pct, 2) + '%' : '—'),
+    'سقف اهرم صرافی: ' + (limits.max_exchange_leverage_cap !== undefined ? formatNumber_(limits.max_exchange_leverage_cap, 2) + 'x' : '—'),
+    'حداکثر پوزیشن هم‌زمان: ' + (limits.max_open_positions !== undefined ? limits.max_open_positions : '—'),
+    'آخرین ثبت پایگاه داده: ' + formatTime_(state.updated_at),
+    'رویدادهای گزارش اخیر: ' + (snap.report_delivery ? (snap.report_delivery.events_saved + '/' + snap.report_delivery.events_received) : 'تأیید نشده'),
+    'وضعیت اعلان Telegram: ' + (snap.report_delivery ? snap.report_delivery.notification_status : 'تأیید نشده')
+  ];
+
+  const perSymbol = snap.symbol_status || {};
+  Object.keys(perSymbol).slice(0, 10).forEach(symbol => {
+    const s = perSymbol[symbol] || {};
+    const pos = s.position;
+    lines.push('\n' + symbol + ' — آخرین کندل کامل: ' + formatTime_(s.last_closed_candle));
+    lines.push('آخرین کندل پردازش‌شده: ' + formatTime_(s.last_processed_candle) + ' | سرمایه مدل: ' + formatNumber_(s.strategy_equity, 2));
+    if (pos) lines.push('پوزیشن شناخته‌شده: ' + pos.side + ' | ورود ' + formatNumber_(pos.entry_price) + ' | حد ' + formatNumber_(pos.current_stop));
+    if (s.reconciliation_pending) lines.push('⚠️ تطبیق تاریخچه خروج در انتظار است.');
+  });
+
+  lines.push('\nℹ️ تنظیم سفارش‌گذاری GitHub نشان‌دهندهٔ وضعیت پیکربندی Bot است؛ Position Monitor همیشه مسیر ورود جدید را غیرفعال نگه می‌دارد. این اطلاعات از snapshot ذخیره‌شده است، نه داده زنده صرافی.');
+  return lines.join('\n');
+}
+
 function executeTelegramCommand_(raw) {
   const parts = raw.split(/\s+/);
   const command = String(parts[0] || '').split('@')[0].toLowerCase();
@@ -751,33 +840,7 @@ function executeTelegramCommand_(raw) {
     return '🤖 کنترل Breakout V1 Dynamic\n\n/status — آخرین وضعیت ذخیره‌شده\n/positions — پوزیشن‌های باز ثبت‌شده\n/trades [تعداد] — معاملات بسته‌شده\n/trades page [شماره] — صفحه تاریخچه\n/events [تعداد] — رویدادهای اخیر\n/events page [شماره] — صفحه رویدادها\n/pause — توقف ورودهای جدید در اجرای بعدی\n/resume — فعال‌کردن ورودهای جدید\n\nاین فرمان‌ها فقط از داده‌های ذخیره‌شده در Google Sheets استفاده می‌کنند و برای پاسخ‌دادن صرافی را query نمی‌کنند.';
   }
   if (command === '/status') {
-    const state = getBotState_();
-    const snap = state.snapshot || {};
-    const lines = [
-      '📊 وضعیت ذخیره‌شده Breakout V1 Dynamic',
-      'وضعیت آخرین اجرا: ' + (snap.run_status || 'نامشخص'),
-      'شروع آخرین اجرا: ' + formatTime_(snap.run_started_at),
-      'پایان آخرین اجرا: ' + formatTime_(snap.run_finished_at),
-      'آخرین پاسخ موفق API: ' + formatTime_(snap.last_api_success_at),
-      'نمادها: ' + (Array.isArray(snap.symbols) ? snap.symbols.join(', ') : '—'),
-      'منبع داده: ' + (snap.signal_data_source || '—'),
-      'سفارش‌گذاری فعال: ' + (snap.trading_enabled ? 'بله (تنظیم‌شده)' : 'خیر'),
-      'ورودهای جدید: ' + (state.paused ? '⏸️ متوقف' : '✅ فعال'),
-      'آخرین ثبت پایگاه داده: ' + formatTime_(state.updated_at),
-      'رویدادهای گزارش اخیر: ' + (snap.report_delivery ? (snap.report_delivery.events_saved + '/' + snap.report_delivery.events_received) : 'تأیید نشده'),
-      'وضعیت اعلان Telegram: ' + (snap.report_delivery ? snap.report_delivery.notification_status : 'تأیید نشده')
-    ];
-    const perSymbol = snap.symbol_status || {};
-    Object.keys(perSymbol).slice(0, 10).forEach(symbol => {
-      const s = perSymbol[symbol] || {};
-      const pos = s.position;
-      lines.push('\n' + symbol + ' — آخرین کندل کامل: ' + formatTime_(s.last_closed_candle));
-      lines.push('آخرین کندل پردازش‌شده: ' + formatTime_(s.last_processed_candle) + ' | سرمایه مدل: ' + formatNumber_(s.strategy_equity, 2));
-      if (pos) lines.push('پوزیشن شناخته‌شده: ' + pos.side + ' | ورود ' + formatNumber_(pos.entry_price) + ' | حد ' + formatNumber_(pos.current_stop));
-      if (s.reconciliation_pending) lines.push('⚠️ تطبیق تاریخچه خروج در انتظار است.');
-    });
-    lines.push('\nℹ️ این اطلاعات از آخرین snapshot ذخیره‌شده است، نه داده زنده صرافی.');
-    return lines.join('\n');
+    return buildStatusMessage_(getBotState_());
   }
   if (command === '/positions') {
     const rows = sheetRowsAsObjects_(getSheet_('Positions', POSITION_HEADERS), POSITION_HEADERS)
