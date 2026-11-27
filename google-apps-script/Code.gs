@@ -772,11 +772,17 @@ function handleTelegramWebhook_(e, params) {
 function buildStatusMessage_(state) {
   state = state && typeof state === 'object' ? state : {};
   const snap = state.snapshot && typeof state.snapshot === 'object' ? state.snapshot : {};
-  const botSnap = state.bot_snapshot && typeof state.bot_snapshot === 'object'
+  const storedBotSnapshot = state.bot_snapshot && typeof state.bot_snapshot === 'object'
     ? state.bot_snapshot
-    : (String(snap.run_mode || '') === 'position_monitor' ? {} : snap);
-  const monitorSnap = state.monitor_snapshot && typeof state.monitor_snapshot === 'object'
+    : {};
+  const storedMonitorSnapshot = state.monitor_snapshot && typeof state.monitor_snapshot === 'object'
     ? state.monitor_snapshot
+    : {};
+  const botSnap = Object.keys(storedBotSnapshot).length
+    ? storedBotSnapshot
+    : (String(snap.run_mode || '') === 'position_monitor' ? {} : snap);
+  const monitorSnap = Object.keys(storedMonitorSnapshot).length
+    ? storedMonitorSnapshot
     : (String(snap.run_mode || '') === 'position_monitor' ? snap : {});
   const limits = snap.portfolio_limits && typeof snap.portfolio_limits === 'object'
     ? snap.portfolio_limits
