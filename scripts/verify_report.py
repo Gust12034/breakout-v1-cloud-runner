@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from pathlib import Path
@@ -50,6 +51,11 @@ def main() -> int:
         "; effective_trading_enabled=" + str(bool(snapshot.get("effective_trading_enabled"))).lower() +
         "; new_entries_this_run=" + str(snapshot.get("new_entries_this_run", 0))
     )
+
+    print(
+        "[VERIFY] bot_trading_enabled_configured=" +
+        str(bool(snapshot.get("bot_trading_enabled_configured", snapshot.get("trading_enabled")))).lower()
+    )
     if args.expected_mode == "four_hour_analysis_and_execution":
         print(
             "[SCAN] requested=" + str(market.get("requested_count", "missing")) +
@@ -61,6 +67,38 @@ def main() -> int:
         print("[MONITOR] analysis_performed=" + str(snapshot.get("analysis_performed", "missing")))
 
     issues: list[str] = []
+    limits = snapshot.get("portfolio_limits")
+    if not isinstance(limits, dict):
+        issues.append("portfolio_limits is missing from the saved runtime snapshot")
+    else:
+        required_limits = {
+            "max_new_entries_per_run": (0, 80),
+            "portfolio_max_notional_x": (0.000001, 21),
+            "risk_per_position_pct": (0.000001, 100 / max(1, as_int(limits.get("max_open_positions", 7)))),
+            "portfolio_margin_budget_pct": (0.000001, 100),
+            "max_exchange_leverage_cap": (1, 125),
+        }
+        print(
+            "[LIMITS] max_new_entries_per_run=" + str(limits.get("max_new_entries_per_run", "missing")) +
+            "; portfolio_max_notional_x=" + str(limits.get("portfolio_max_notional_x", "missing")) +
+            "; risk_per_position_pct=" + str(limits.get("risk_per_position_pct", "missing")) +
+            "; portfolio_margin_budget_pct=" + str(limits.get("portfolio_margin_budget_pct", "missing")) +
+            "; max_exchange_leverage_cap=" + str(limits.get("max_exchange_leverage_cap", "missing"))
+        )
+        for key, (minimum, maximum) in required_limits.items():
+            try:
+                value = float(limits.get(key))
+            except (TypeError, ValueError):
+                issues.append("saved portfolio limit " + key + " is missing or non-numeric")
+                continue
+            if not math.isfinite(value) or value < minimum or value > maximum:
+                issues.append("saved portfolio limit " + key + " is outside its validated range")
+        try:
+            entries = float(limits.get("max_new_entries_per_run"))
+            if not entries.is_integer():
+                issues.append("max_new_entries_per_run must be an integer")
+        except (TypeError, ValueError):
+            pass
     if mode != args.expected_mode:
         issues.append("snapshot run_mode does not match the workflow")
     if status not in {"success", "failed"}:
