@@ -23,7 +23,7 @@ jobs:
       ALLOW_POSITION_RECOVERY: 'false'
       SYMBOL_PROCESS_DELAY_SEC: '0.12'
       PYTHONUNBUFFERED: '1'
-      LIVE_TRADING: 'false'
+      LIVE_TRADING: ${{ vars.LIVE_TRADING || 'false' }}
       BITGET_DEMO_API_KEY: ${{ secrets.BITGET_DEMO_API_KEY }}
       BITGET_DEMO_API_SECRET: ${{ secrets.BITGET_DEMO_API_SECRET }}
       BITGET_DEMO_API_PASSPHRASE: ${{ secrets.BITGET_DEMO_API_PASSPHRASE }}
@@ -58,6 +58,17 @@ jobs:
           python -m py_compile scripts/sanitize_runner_log.py scripts/verify_report.py scripts/test_workflow_safety.py scripts/test_log_sanitizer.py
           python scripts/test_log_sanitizer.py
           python scripts/test_workflow_safety.py
+      - name: Validate Demo-only monitor safety
+        shell: bash
+        run: |
+          if [ "$TRADING_ENABLED" != "false" ]; then
+            echo "::error::Position Monitor must keep TRADING_ENABLED=false."
+            exit 1
+          fi
+          if [ "$LIVE_TRADING" != "false" ]; then
+            echo "::error::LIVE_TRADING must remain false; mainnet execution is not supported."
+            exit 1
+          fi
       - name: Install decryptor dependency
         run: python -m pip install --disable-pip-version-check 'cryptography>=42,<50'
       - name: Verify encrypted runtime integrity
