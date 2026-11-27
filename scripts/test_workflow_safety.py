@@ -30,5 +30,18 @@ require(r"scripts/test_log_sanitizer\.py", BOT, "Bot workflow runs secret-redact
 require(r"scripts/test_log_sanitizer\.py", MONITOR, "Position Monitor runs secret-redaction regression tests")
 require(r"uses:\s*actions/upload-artifact@v7\.0\.2", BOT, "Bot workflow uses the Node 24 compatible upload-artifact release")
 require(r"uses:\s*actions/upload-artifact@v7\.0\.2", MONITOR, "Position Monitor uses the Node 24 compatible upload-artifact release")
+require(r"BOT_TRADING_ENABLED:\s*\$\{\{\s*vars\.TRADING_ENABLED\s*\|\|\s*'false'\s*\}\}", BOT, "Bot records the configured order-entry variable in its snapshot")
+require(r"BOT_TRADING_ENABLED:\s*\$\{\{\s*vars\.TRADING_ENABLED\s*\|\|\s*'false'\s*\}\}", MONITOR, "Position Monitor reports Bot order-entry configuration without enabling entries")
+
+require(r"^\s*MAX_NEW_ENTRIES_PER_RUN:\s*\$\{\{\s*vars\.MAX_NEW_ENTRIES_PER_RUN\s*\|\|\s*'4'\s*\}\}\s*$", BOT, "Bot uses repository Variable MAX_NEW_ENTRIES_PER_RUN")
+require(r"^\s*MAX_NEW_ENTRIES_PER_RUN:\s*\$\{\{\s*vars\.MAX_NEW_ENTRIES_PER_RUN\s*\|\|\s*'4'\s*\}\}\s*$", MONITOR, "Position Monitor uses repository Variable MAX_NEW_ENTRIES_PER_RUN")
+require(r"^\s*PORTFOLIO_MAX_NOTIONAL_X:\s*\$\{\{\s*vars\.PORTFOLIO_MAX_NOTIONAL_X\s*\|\|\s*'9.0'\s*\}\}\s*$", BOT, "Bot uses repository Variable PORTFOLIO_MAX_NOTIONAL_X")
+require(r"^\s*PORTFOLIO_MAX_NOTIONAL_X:\s*\$\{\{\s*vars\.PORTFOLIO_MAX_NOTIONAL_X\s*\|\|\s*'9.0'\s*\}\}\s*$", MONITOR, "Position Monitor uses repository Variable PORTFOLIO_MAX_NOTIONAL_X")
+require(r"^\s*RISK_PER_POSITION_PCT:\s*\$\{\{\s*vars\.RISK_PER_POSITION_PCT\s*\|\|\s*'6.5'\s*\}\}\s*$", BOT, "Bot uses repository Variable RISK_PER_POSITION_PCT")
+require(r"^\s*RISK_PER_POSITION_PCT:\s*\$\{\{\s*vars\.RISK_PER_POSITION_PCT\s*\|\|\s*'6.5'\s*\}\}\s*$", MONITOR, "Position Monitor uses repository Variable RISK_PER_POSITION_PCT")
+require(r"^\s*PORTFOLIO_MARGIN_BUDGET_PCT:\s*\$\{\{\s*vars\.PORTFOLIO_MARGIN_BUDGET_PCT\s*\|\|\s*'100.0'\s*\}\}\s*$", BOT, "Bot uses repository Variable PORTFOLIO_MARGIN_BUDGET_PCT")
+require(r"^\s*PORTFOLIO_MARGIN_BUDGET_PCT:\s*\$\{\{\s*vars\.PORTFOLIO_MARGIN_BUDGET_PCT\s*\|\|\s*'100.0'\s*\}\}\s*$", MONITOR, "Position Monitor uses repository Variable PORTFOLIO_MARGIN_BUDGET_PCT")
+require(r"^\s*MAX_EXCHANGE_LEVERAGE_CAP:\s*\$\{\{\s*vars\.MAX_EXCHANGE_LEVERAGE_CAP\s*\|\|\s*'10.0'\s*\}\}\s*$", BOT, "Bot uses repository Variable MAX_EXCHANGE_LEVERAGE_CAP")
+require(r"^\s*MAX_EXCHANGE_LEVERAGE_CAP:\s*\$\{\{\s*vars\.MAX_EXCHANGE_LEVERAGE_CAP\s*\|\|\s*'10.0'\s*\}\}\s*$", MONITOR, "Position Monitor uses repository Variable MAX_EXCHANGE_LEVERAGE_CAP")
 
 print("PASS: workflow safety and reporting assertions completed.")
