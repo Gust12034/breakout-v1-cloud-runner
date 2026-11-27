@@ -20,7 +20,7 @@ jobs:
     env:
       TRADING_ENABLED: ${{ vars.TRADING_ENABLED || 'false' }}
       PYTHONUNBUFFERED: '1'
-      LIVE_TRADING: 'false'
+      LIVE_TRADING: ${{ vars.LIVE_TRADING || 'false' }}
       BITGET_DEMO_API_KEY: ${{ secrets.BITGET_DEMO_API_KEY }}
       BITGET_DEMO_API_SECRET: ${{ secrets.BITGET_DEMO_API_SECRET }}
       BITGET_DEMO_API_PASSPHRASE: ${{ secrets.BITGET_DEMO_API_PASSPHRASE }}
