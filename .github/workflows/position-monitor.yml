@@ -126,6 +126,13 @@ jobs:
       - name: Monitor tracked positions only (no entry path)
         id: run_monitor
         shell: bash
+        env:
+          BOT_TRADING_ENABLED: ${{ vars.TRADING_ENABLED || 'false' }}
+          MAX_NEW_ENTRIES_PER_RUN: ${{ vars.MAX_NEW_ENTRIES_PER_RUN || '4' }}
+          PORTFOLIO_MAX_NOTIONAL_X: ${{ vars.PORTFOLIO_MAX_NOTIONAL_X || '9.0' }}
+          RISK_PER_POSITION_PCT: ${{ vars.RISK_PER_POSITION_PCT || '6.5' }}
+          PORTFOLIO_MARGIN_BUDGET_PCT: ${{ vars.PORTFOLIO_MARGIN_BUDGET_PCT || '100.0' }}
+          MAX_EXCHANGE_LEVERAGE_CAP: ${{ vars.MAX_EXCHANGE_LEVERAGE_CAP || '10.0' }}
         run: |
           set +e
           python "$RUNNER_TEMP/breakout_runtime/runner.py" --monitor-only > "$RUNNER_TEMP/breakout_monitor.log" 2>&1
