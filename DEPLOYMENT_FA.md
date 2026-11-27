@@ -50,7 +50,7 @@
 | Variable | مقدار پیشنهادی اولیه | کاربرد |
 |---|---:|---|
 | `TRADING_ENABLED` | `false` | کلید روشن/خاموش‌کردن سفارش‌گذاری Bitget Classic Demo؛ فقط Bot از آن برای ورود استفاده می‌کند |
-| `LIVE_TRADING` | قفل ثابت `false` | مقدار Variable با این نام نادیده گرفته می‌شود؛ Mainnet عمداً قابل فعال‌سازی نیست |
+| `LIVE_TRADING` | `false` | مقدار Variable خوانده می‌شود، اما هر مقدار غیر از `false` قبل از اجرا رد می‌شود؛ Mainnet قابل فعال‌سازی نیست |
 | `TRADE_TOP_COINS` | `true` | اگر true باشد، ورودها از Universe انتخابی Top-N و قراردادهای قابل‌اجرای Demo انجام می‌شوند |
 | `TRADE_SYMBOLS` | `BTCUSDT` | نمادهای دستی وقتی `TRADE_TOP_COINS=false` است |
 | `ANALYZE_TOP_COINS` | `true` | فعال‌بودن اسکن بازار |
@@ -84,7 +84,7 @@
 
 **دربارهٔ Telegram:** متغیر `TELEGRAM_ENABLED` در Workflow فعلی خوانده نمی‌شود و سفارش‌گذاری را تغییر نمی‌دهد. اعلان Telegram از Script Properties با نام‌های `TELEGRAM_BOT_TOKEN` و `TELEGRAM_CHAT_ID` در Google Apps Script استفاده می‌کند.
 
-**قفل بازار واقعی:** `LIVE_TRADING` در Workflow به‌صورت ثابت `false` است و نباید آن را به Variable قابل‌تنظیم تبدیل کنی. این پروژه فقط برای Bitget Classic Demo طراحی شده است.
+**قفل بازار واقعی:** `LIVE_TRADING` از Repository Variable خوانده می‌شود تا مقدار آن در GitHub قابل مشاهده باشد، اما هر مقدار غیر از `false` باعث توقف Workflow پیش از اجرای runtime می‌شود. این گزینه فقط می‌تواند خاموش بماند؛ پروژه فقط برای Bitget Classic Demo طراحی شده است.
 
 ### اصلاح گزارش `/status`
 
